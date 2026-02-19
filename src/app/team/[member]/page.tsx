@@ -370,13 +370,30 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
               <CardTitle>Worklog Calendar (click a date)</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="grid grid-cols-7 gap-2 text-center text-xs uppercase tracking-wider text-slate-600 dark:text-slate-400">
-                <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+              <div className="grid grid-cols-7 gap-2 text-center text-xs uppercase tracking-wider">
+                {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label, i) => (
+                  <span
+                    key={label}
+                    className={i >= 5 ? "text-slate-500 dark:text-slate-500" : "text-slate-600 dark:text-slate-400"}
+                  >
+                    {label}
+                  </span>
+                ))}
               </div>
               <div className="grid grid-cols-7 gap-2">
                 {calendarCells.map((cell, index) => {
+                  const isWeekendColumn = index % 7 >= 5;
                   if (!cell.date) {
-                    return <div key={`empty-${index}`} className="h-20 rounded border border-dashed border-slate-300/60 dark:border-slate-700/40" />;
+                    return (
+                      <div
+                        key={`empty-${index}`}
+                        className={`h-20 rounded border border-dashed ${
+                          isWeekendColumn
+                            ? "border-slate-300/80 bg-slate-200/50 dark:border-slate-700/60 dark:bg-slate-900/30"
+                            : "border-slate-300/60 dark:border-slate-700/40"
+                        }`}
+                      />
+                    );
                   }
                   const key = dayKey(cell.date);
                   const hours = dayHours.get(key) ?? 0;
@@ -384,6 +401,7 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
                   const isSelected = selectedDay === key;
                   const isOverbooked = dailyTarget > 0 && hours > dailyTarget * 1.15;
                   const isToday = key === todayKey;
+                  const isWeekend = cell.date.getDay() === 0 || cell.date.getDay() === 6;
                   return (
                     <Link
                       key={key}
@@ -395,8 +413,10 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
                             ? "border-indigo-500 bg-indigo-100/70 dark:border-indigo-400 dark:bg-indigo-900/20"
                           : isOverbooked
                             ? "border-rose-400 bg-rose-100/70 dark:border-rose-500 dark:bg-rose-900/20"
+                            : isWeekend
+                              ? "border-slate-300/90 bg-slate-200/80 text-slate-600 dark:border-slate-700/70 dark:bg-slate-900/70 dark:text-slate-300"
                             : "border-slate-300 bg-slate-100/80 dark:border-slate-700 dark:bg-slate-900/50"
-                      }`}
+                      } ${isWeekend ? "ring-1 ring-slate-300/70 dark:ring-slate-700/60" : ""}`}
                     >
                       <div className="flex items-center justify-between text-xs font-semibold">
                         <span>{cell.date.getDate()}</span>
