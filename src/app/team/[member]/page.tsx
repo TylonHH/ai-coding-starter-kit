@@ -178,6 +178,12 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
   const targetHoursMonth = dailyTarget * weekdaysInMonth;
   const monthTotal = totalHours;
   const monthProgress = targetHoursMonth > 0 ? Math.min(monthTotal / targetHoursMonth, 1.5) : 0;
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const workingDaysElapsed =
+    todayStart < start ? 0 : todayStart > end ? weekdaysInMonth : countWeekdays(start, todayStart);
+  const targetTimelinePercent =
+    weekdaysInMonth > 0 ? Math.min((workingDaysElapsed / weekdaysInMonth) * 100, 100) : 0;
 
   const firstWeekdayMondayBased = (start.getDay() + 6) % 7;
   const daysInMonth = end.getDate();
@@ -314,11 +320,19 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
             <CardHeader className="pb-1">
               <CardTitle className="text-sm text-slate-700 dark:text-slate-300">Month Progress</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2">
+            <CardContent className="space-y-2.5">
               <div className="text-3xl font-semibold">{hourFormat(monthTotal)}</div>
-              <div className="h-2 overflow-hidden rounded bg-slate-300 dark:bg-slate-800">
+              <div className="relative h-2 overflow-hidden rounded bg-slate-300 dark:bg-slate-800">
                 <div className="h-full bg-gradient-to-r from-emerald-300 via-cyan-300 to-indigo-300" style={{ width: `${Math.min(monthProgress * 100, 100)}%` }} />
+                <div
+                  className="absolute inset-y-0 w-[2px] bg-slate-900/70 dark:bg-slate-100/80"
+                  style={{ left: `calc(${targetTimelinePercent}% - 1px)` }}
+                  title={`Target marker: ${workingDaysElapsed}/${weekdaysInMonth} working days`}
+                />
               </div>
+              <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                marker = {workingDaysElapsed}/{weekdaysInMonth} working days ({targetTimelinePercent.toFixed(0)}%)
+              </p>
             </CardContent>
           </Card>
         </section>
