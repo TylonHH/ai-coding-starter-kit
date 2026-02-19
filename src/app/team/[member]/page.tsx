@@ -374,7 +374,7 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
                 {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label, i) => (
                   <span
                     key={label}
-                    className={i >= 5 ? "text-slate-500 dark:text-slate-500" : "text-slate-600 dark:text-slate-400"}
+                    className={i >= 5 ? "text-slate-400 dark:text-slate-600" : "text-slate-600 dark:text-slate-400"}
                   >
                     {label}
                   </span>
@@ -389,7 +389,7 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
                         key={`empty-${index}`}
                         className={`h-20 rounded border border-dashed ${
                           isWeekendColumn
-                            ? "border-slate-300/80 bg-slate-200/50 dark:border-slate-700/60 dark:bg-slate-900/30"
+                            ? "border-slate-200/70 bg-slate-100/35 dark:border-slate-800/60 dark:bg-slate-900/20"
                             : "border-slate-300/60 dark:border-slate-700/40"
                         }`}
                       />
@@ -414,9 +414,9 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
                           : isOverbooked
                             ? "border-rose-400 bg-rose-100/70 dark:border-rose-500 dark:bg-rose-900/20"
                             : isWeekend
-                              ? "border-slate-300/90 bg-slate-200/80 text-slate-600 dark:border-slate-700/70 dark:bg-slate-900/70 dark:text-slate-300"
+                              ? "border-slate-200/80 bg-slate-100/40 text-slate-400 dark:border-slate-800/70 dark:bg-slate-900/25 dark:text-slate-500"
                             : "border-slate-300 bg-slate-100/80 dark:border-slate-700 dark:bg-slate-900/50"
-                      } ${isWeekend ? "ring-1 ring-slate-300/70 dark:ring-slate-700/60" : ""}`}
+                      } ${isWeekend ? "ring-1 ring-slate-200/60 dark:ring-slate-800/60" : ""}`}
                     >
                       <div className="flex items-center justify-between text-xs font-semibold">
                         <span>{cell.date.getDate()}</span>
