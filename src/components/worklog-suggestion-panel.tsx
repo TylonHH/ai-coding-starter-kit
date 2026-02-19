@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Loader2, RefreshCw, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,7 +33,12 @@ type Props = {
   projectKey: string;
   existingIssueKeys: string[];
   jiraBrowseUrl: string;
+  canUseAi: boolean;
 };
+
+const AI_PROMPT_STORAGE_KEY = "jira-worklog-ai-system-prompt-v1";
+const DEFAULT_AI_PROMPT =
+  "Du formulierst knappe deutsche Worklog-Notizen für Jira. Gib nur den finalen Einzeiler aus.";
 
 function toLocalInputValue(value: string): string {
   const date = new Date(value);
@@ -67,14 +72,27 @@ export function WorklogSuggestionPanel({
   projectKey,
   existingIssueKeys,
   jiraBrowseUrl,
+  canUseAi,
 }: Props) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generateError, setGenerateError] = useState("");
   const [rows, setRows] = useState<EditableSuggestion[]>([]);
+  const [aiSystemPrompt, setAiSystemPrompt] = useState(DEFAULT_AI_PROMPT);
 
   const existingIssueKeysSet = useMemo(() => new Set(existingIssueKeys), [existingIssueKeys]);
 
-  async function generateSuggestions() {
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(AI_PROMPT_STORAGE_KEY);
+      if (stored && stored.trim()) {
+        setAiSystemPrompt(stored);
+      }
+    } catch {
+      setAiSystemPrompt(DEFAULT_AI_PROMPT);
+    }
+  }, []);
+
+  async function generateSuggestions(mode: "fallback" | "ai") {
     setIsGenerating(true);
     setGenerateError("");
     try {
@@ -89,6 +107,8 @@ export function WorklogSuggestionPanel({
           date,
           projectKey,
           existingIssueKeys: [...existingIssueKeysSet],
+          mode,
+          aiSystemPrompt: mode === "ai" ? aiSystemPrompt : undefined,
         }),
       });
       const payload = (await response.json()) as { suggestions?: Suggestion[]; error?: string };
@@ -107,6 +127,14 @@ export function WorklogSuggestionPanel({
       setGenerateError(error instanceof Error ? error.message : "Unknown error");
     } finally {
       setIsGenerating(false);
+    }
+  }
+
+  function persistAiPrompt() {
+    try {
+      localStorage.setItem(AI_PROMPT_STORAGE_KEY, aiSystemPrompt);
+    } catch {
+      // ignore storage errors
     }
   }
 
@@ -158,11 +186,17 @@ export function WorklogSuggestionPanel({
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <Button type="button" onClick={generateSuggestions} disabled={isGenerating} className="bg-cyan-600 hover:bg-cyan-500">
+        <Button type="button" onClick={() => generateSuggestions("fallback")} disabled={isGenerating} className="bg-cyan-600 hover:bg-cyan-500">
           {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-          Create Suggestions
+          Create Suggestions (Default)
         </Button>
-        <Button type="button" variant="outline" onClick={generateSuggestions} disabled={isGenerating}>
+        {canUseAi && (
+          <Button type="button" variant="outline" onClick={() => generateSuggestions("ai")} disabled={isGenerating}>
+            {isGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+            Create Suggestions (AI)
+          </Button>
+        )}
+        <Button type="button" variant="outline" onClick={() => generateSuggestions("fallback")} disabled={isGenerating}>
           <RefreshCw className="mr-2 h-4 w-4" />
           Refresh
         </Button>
@@ -170,6 +204,21 @@ export function WorklogSuggestionPanel({
           Vorschläge für {date} {projectKey !== "all" ? `(${projectKey})` : "(alle Projekte)"}
         </span>
       </div>
+
+      {canUseAi && (
+        <div className="space-y-2 rounded border border-slate-300 bg-slate-100/80 p-3 dark:border-slate-700 dark:bg-slate-900/50">
+          <p className="text-xs font-medium text-slate-700 dark:text-slate-300">AI System Prompt (nur für Jira API User)</p>
+          <textarea
+            value={aiSystemPrompt}
+            onChange={(event) => setAiSystemPrompt(event.target.value)}
+            className="h-20 w-full rounded border border-slate-300 bg-white/80 p-2 text-xs text-slate-900 dark:border-slate-700 dark:bg-slate-950/40 dark:text-slate-100"
+          />
+          <div className="flex items-center gap-2">
+            <Button type="button" size="sm" variant="outline" onClick={persistAiPrompt}>Save Prompt</Button>
+            <Button type="button" size="sm" variant="outline" onClick={() => setAiSystemPrompt(DEFAULT_AI_PROMPT)}>Reset</Button>
+          </div>
+        </div>
+      )}
 
       {generateError && (
         <p className="rounded border border-rose-400/60 bg-rose-100 px-3 py-2 text-sm text-rose-900 dark:bg-rose-900/20 dark:text-rose-200">
@@ -179,7 +228,7 @@ export function WorklogSuggestionPanel({
 
       {rows.length === 0 && !isGenerating && (
         <p className="rounded border border-slate-300 bg-slate-100/80 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300">
-          Noch keine Vorschläge geladen. Klicke auf <strong>Create Suggestions</strong>.
+          Noch keine Vorschläge geladen. Klicke auf <strong>Create Suggestions (Default)</strong>{canUseAi ? " oder Create Suggestions (AI)" : ""}.
         </p>
       )}
 

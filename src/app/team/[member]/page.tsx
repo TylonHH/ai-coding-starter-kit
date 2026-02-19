@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, ChevronLeft, ChevronRight, Link2, RefreshCw, Timer } from "lucide-react";
 import { hasValidSessionCookie } from "@/lib/auth";
-import { fetchJiraWorklogs } from "@/lib/jira";
+import { fetchJiraWorklogs, fetchWorklogCommentsByEntryIds, getJiraCurrentUser } from "@/lib/jira";
 import { isSupabaseConfigured } from "@/lib/supabase-admin";
 import { WorklogSuggestionPanel } from "@/components/worklog-suggestion-panel";
 import { readAllWorklogs, readContributorTargets } from "@/lib/worklog-store";
@@ -104,6 +104,24 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
     );
   const preferredAccountId =
     [...memberAccountId.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
+  let canUseAi = false;
+  try {
+    const currentUser = await getJiraCurrentUser();
+    const normalizedMember = member.trim().toLowerCase();
+    const matchesName =
+      currentUser.displayName.trim().toLowerCase() &&
+      currentUser.displayName.trim().toLowerCase() === normalizedMember;
+    const matchesEmail =
+      currentUser.emailAddress.trim().toLowerCase() &&
+      currentUser.emailAddress.trim().toLowerCase() === normalizedMember;
+    const matchesAccountId =
+      currentUser.accountId.trim() &&
+      preferredAccountId &&
+      currentUser.accountId.trim() === preferredAccountId;
+    canUseAi = Boolean(matchesName || matchesEmail || matchesAccountId);
+  } catch {
+    canUseAi = false;
+  }
 
   const targets = isSupabaseConfigured() ? await readContributorTargets() : {};
   const normalizedTargetMap = new Map(
@@ -174,7 +192,7 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
     calendarCells.push({ date: null });
   }
 
-  const selectedDayLogs = selectedDay
+  let selectedDayLogs = selectedDay
     ? scopedEntries
         .filter((item) => dayKey(new Date(item.started)) === selectedDay)
         .sort((a, b) => new Date(b.started).getTime() - new Date(a.started).getTime())
@@ -184,7 +202,7 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
   const selectedDayIssueKeys = [...new Set(selectedDayLogs.map((item) => item.issueKey))];
   const todayKey = dayKey(new Date());
 
-  const selectedIssueLogs = selectedIssue
+  let selectedIssueLogs = selectedIssue
     ? entries
         .filter(
           (item) =>
@@ -194,6 +212,26 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
         )
         .sort((a, b) => new Date(b.started).getTime() - new Date(a.started).getTime())
     : [];
+
+  const missingCommentIds = [
+    ...new Set(
+      [...selectedDayLogs, ...selectedIssueLogs]
+        .filter((entry) => !entry.comment?.trim() && entry.id.includes(":"))
+        .map((entry) => entry.id)
+    ),
+  ];
+  if (missingCommentIds.length > 0) {
+    const liveComments = await fetchWorklogCommentsByEntryIds(missingCommentIds);
+    if (Object.keys(liveComments).length > 0) {
+      const fillComments = <T extends { id: string; comment: string }>(rows: T[]) =>
+        rows.map((row) => ({
+          ...row,
+          comment: row.comment?.trim() ? row.comment : liveComments[row.id] ?? row.comment,
+        }));
+      selectedDayLogs = fillComments(selectedDayLogs);
+      selectedIssueLogs = fillComments(selectedIssueLogs);
+    }
+  }
 
   const selectedIssueHours = selectedIssueLogs.reduce((sum, item) => sum + item.seconds / 3600, 0);
   const selectedIssueMemberHours = selectedIssueLogs
@@ -453,6 +491,7 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
                   projectKey={activeProject}
                   existingIssueKeys={selectedDayIssueKeys}
                   jiraBrowseUrl={jiraBrowseUrl}
+                  canUseAi={canUseAi}
                 />
               </CardContent>
             </Card>

@@ -8,6 +8,8 @@ type Payload = {
   date: string;
   projectKey?: string;
   existingIssueKeys?: string[];
+  mode?: "fallback" | "ai";
+  aiSystemPrompt?: string;
 };
 
 export async function POST(request: Request) {
@@ -64,6 +66,8 @@ export async function POST(request: Request) {
       existingIssueKeys: Array.isArray(body.existingIssueKeys)
         ? body.existingIssueKeys.filter((key): key is string => typeof key === "string")
         : [],
+      mode: body.mode === "ai" ? "ai" : "fallback",
+      aiSystemPrompt: typeof body.aiSystemPrompt === "string" ? body.aiSystemPrompt : undefined,
     });
 
     return NextResponse.json({ suggestions });

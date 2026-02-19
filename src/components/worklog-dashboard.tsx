@@ -669,8 +669,8 @@ export function WorklogDashboard({ entries, contributorTargets, jiraBrowseUrl, s
                         {formatDayEu(point.day)}
                       </text>
                     ))}
-                  <polyline points={trendPath} fill="none" stroke="url(#trendLine)" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" transform="translate(0,10)" />
-                  <polyline points={trendTargetPath} fill="none" stroke="#22c55e" strokeWidth="2" strokeDasharray="5 4" strokeLinejoin="round" strokeLinecap="round" transform="translate(0,10)" />
+                  <polyline points={trendPath} fill="none" stroke="url(#trendLine)" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
+                  <polyline points={trendTargetPath} fill="none" stroke="#22c55e" strokeWidth="2" strokeDasharray="5 4" strokeLinejoin="round" strokeLinecap="round" />
                   {trendPoints.map((point) => (
                     <g key={point.day}>
                       <circle

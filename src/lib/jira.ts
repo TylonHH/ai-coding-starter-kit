@@ -159,6 +159,8 @@ type SuggestionQuery = {
   accountId?: string;
   projectKey?: string;
   existingIssueKeys?: string[];
+  mode?: "fallback" | "ai";
+  aiSystemPrompt?: string;
 };
 
 type AiSuggestionInput = {
@@ -168,6 +170,7 @@ type AiSuggestionInput = {
   changedFields: string[];
   commentCount: number;
   historyCount: number;
+  aiSystemPrompt?: string;
 };
 
 function getRequiredEnv(name: string): string {
@@ -466,6 +469,8 @@ async function maybeGenerateAiSuggestionLine(input: AiSuggestionInput): Promise<
   }
 
   const model = (process.env.OPENAI_MODEL ?? "gpt-4o-mini").trim();
+  const systemPrompt = (input.aiSystemPrompt ?? "").trim() ||
+    "Du formulierst knappe deutsche Worklog-Notizen für Jira. Gib nur den finalen Einzeiler aus.";
   const userPrompt = [
     `Ticket: ${input.issueKey} - ${input.issueSummary}`,
     `Änderungsfelder: ${input.changedFields.join(", ") || "keine"}`,
@@ -488,8 +493,7 @@ async function maybeGenerateAiSuggestionLine(input: AiSuggestionInput): Promise<
         input: [
           {
             role: "system",
-            content:
-              "Du formulierst knappe deutsche Worklog-Notizen für Jira. Gib nur den finalen Einzeiler aus.",
+            content: systemPrompt,
           },
           {
             role: "user",
@@ -560,6 +564,29 @@ async function getAllIssueWorklogs(cfg: JiraConfig, issue: JiraIssue): Promise<J
   }
 
   return worklogs;
+}
+
+async function fetchAllIssueWorklogsByIssueId(cfg: JiraConfig, issueId: string): Promise<JiraWorklog[]> {
+  const collected: JiraWorklog[] = [];
+  let startAt = 0;
+
+  while (startAt < 5000) {
+    const response = await jiraGet<JiraWorklogResponse>(
+      cfg,
+      `/rest/api/3/issue/${issueId}/worklog`,
+      {
+        startAt,
+        maxResults: 100,
+      }
+    );
+    collected.push(...response.worklogs);
+    startAt += response.maxResults;
+    if (startAt >= response.total || response.worklogs.length === 0) {
+      break;
+    }
+  }
+
+  return collected;
 }
 
 async function fetchIssues(cfg: JiraConfig, teamFieldId = ""): Promise<JiraIssue[]> {
@@ -819,14 +846,17 @@ export async function generateWorklogSuggestions(query: SuggestionQuery): Promis
       commentCount: relevantComments.length,
     });
     const aiComment =
-      (await maybeGenerateAiSuggestionLine({
-        issueKey: issue.key,
-        issueSummary: summary,
-        snippets,
-        changedFields,
-        commentCount: relevantComments.length,
-        historyCount: relevantHistories.length,
-      })) ?? "";
+      query.mode === "ai"
+        ? (await maybeGenerateAiSuggestionLine({
+            issueKey: issue.key,
+            issueSummary: summary,
+            snippets,
+            changedFields,
+            commentCount: relevantComments.length,
+            historyCount: relevantHistories.length,
+            aiSystemPrompt: query.aiSystemPrompt,
+          })) ?? ""
+        : "";
     const finalComment = aiComment || comment;
     const aggregateId = relevantHistories[0]?.id ?? relevantComments[0]?.id ?? issue.id;
     suggestions.push({
@@ -871,6 +901,43 @@ export async function createJiraWorklog(input: {
     seconds: created.timeSpentSeconds,
     comment: normalizeWorklogComment(created.comment),
   };
+}
+
+export async function fetchWorklogCommentsByEntryIds(entryIds: string[]): Promise<Record<string, string>> {
+  if (entryIds.length === 0) {
+    return {};
+  }
+  const cfg = getConfig();
+  const byIssue = new Map<string, Set<string>>();
+  for (const id of entryIds) {
+    const sep = id.indexOf(":");
+    if (sep <= 0) {
+      continue;
+    }
+    const issueId = id.slice(0, sep);
+    const worklogId = id.slice(sep + 1);
+    const set = byIssue.get(issueId) ?? new Set<string>();
+    set.add(worklogId);
+    byIssue.set(issueId, set);
+  }
+
+  const commentMap: Record<string, string> = {};
+  for (const [issueId, worklogIds] of byIssue.entries()) {
+    let worklogs: JiraWorklog[] = [];
+    try {
+      worklogs = await fetchAllIssueWorklogsByIssueId(cfg, issueId);
+    } catch {
+      continue;
+    }
+    for (const worklog of worklogs) {
+      if (!worklogIds.has(worklog.id)) {
+        continue;
+      }
+      commentMap[`${issueId}:${worklog.id}`] = normalizeWorklogComment(worklog.comment);
+    }
+  }
+
+  return commentMap;
 }
 
 export async function getJiraCurrentUser(): Promise<JiraCurrentUser> {
