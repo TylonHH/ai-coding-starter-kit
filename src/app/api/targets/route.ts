@@ -22,12 +22,20 @@ export async function POST(request: Request) {
   }
 
   const parsed = Number(targetHours);
-  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 400) {
-    const fallback = typeof redirectTo === "string" ? redirectTo : "/";
-    return NextResponse.redirect(new URL(`${fallback}?target=invalid`, request.url));
+  const base = typeof redirectTo === "string" ? redirectTo : "/";
+  const redirectUrl = new URL(base, request.url);
+
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 24) {
+    redirectUrl.searchParams.set("target", "invalid");
+    return NextResponse.redirect(redirectUrl);
   }
 
-  await upsertContributorTarget(author, parsed);
-  const base = typeof redirectTo === "string" ? redirectTo : "/";
-  return NextResponse.redirect(new URL(`${base}?target=ok`, request.url));
+  try {
+    await upsertContributorTarget(author, parsed);
+    redirectUrl.searchParams.set("target", "ok");
+    return NextResponse.redirect(redirectUrl);
+  } catch {
+    redirectUrl.searchParams.set("target", "error");
+    return NextResponse.redirect(redirectUrl);
+  }
 }

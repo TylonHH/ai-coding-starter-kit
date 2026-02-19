@@ -20,7 +20,7 @@ type Preset = {
   datePreset: DatePreset;
   startDate: string;
   endDate: string;
-  project: string;
+  projectKey: string;
   team: string;
   author: string;
   search: string;
@@ -29,12 +29,13 @@ type Preset = {
 
 type Props = {
   entries: WorklogEntry[];
+  contributorTargets: Record<string, number>;
   jiraBrowseUrl: string;
   syncEnabled: boolean;
   syncStatus?: string;
 };
 
-const PRESET_STORAGE_KEY = "jira-worklog-presets-v2";
+const PRESET_STORAGE_KEY = "jira-worklog-presets-v3";
 
 function hourFormat(hours: number): string {
   return `${hours.toFixed(1)}h`;
@@ -46,6 +47,11 @@ function toDayKey(date: Date): string {
 
 function toInputDate(date: Date): string {
   return date.toISOString().slice(0, 10);
+}
+
+function daysBetweenInclusive(start: Date, end: Date): number {
+  const diff = end.getTime() - start.getTime();
+  return Math.floor(diff / 86400000) + 1;
 }
 
 function getPresetRange(preset: DatePreset): { start: Date | null; end: Date | null } {
@@ -125,12 +131,12 @@ function buildHeatmap(entries: WorklogEntry[]) {
   };
 }
 
-function polylinePath(values: number[], width: number, height: number): string {
+function polylinePath(values: number[], width: number, height: number, maxOverride?: number): string {
   if (values.length === 0) {
     return "";
   }
 
-  const max = Math.max(...values, 1);
+  const max = maxOverride ?? Math.max(...values, 1);
   return values
     .map((value, index) => {
       const x = (index / Math.max(values.length - 1, 1)) * width;
@@ -140,11 +146,11 @@ function polylinePath(values: number[], width: number, height: number): string {
     .join(" ");
 }
 
-export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStatus }: Props) {
+export function WorklogDashboard({ entries, contributorTargets, jiraBrowseUrl, syncEnabled, syncStatus }: Props) {
   const [datePreset, setDatePreset] = useState<DatePreset>("last30");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const [project, setProject] = useState("all");
+  const [projectKey, setProjectKey] = useState("all");
   const [team, setTeam] = useState("all");
   const [author, setAuthor] = useState("all");
   const [search, setSearch] = useState("");
@@ -195,7 +201,7 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
       datePreset,
       startDate,
       endDate,
-      project,
+      projectKey,
       team,
       author,
       search,
@@ -219,7 +225,7 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
     setDatePreset(target.datePreset);
     setStartDate(target.startDate);
     setEndDate(target.endDate);
-    setProject(target.project);
+    setProjectKey(target.projectKey);
     setTeam(target.team);
     setAuthor(target.author);
     setSearch(target.search);
@@ -236,17 +242,27 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
     setSelectedPreset("none");
   }
 
-  const projects = useMemo(() => ["all", ...new Set(entries.map((item) => item.projectName))], [entries]);
+  const projects = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const item of entries) {
+      map.set(item.projectKey, item.projectName);
+    }
+    return [
+      { key: "all", label: "All Projects" },
+      ...[...map.entries()]
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([key, name]) => ({ key, label: `${key} - ${name}` })),
+    ];
+  }, [entries]);
   const authors = useMemo(() => ["all", ...new Set(entries.map((item) => item.author))], [entries]);
   const teams = useMemo(
     () => ["all", ...new Set(entries.flatMap((item) => item.teamNames).filter((name) => name.trim()))],
     [entries]
   );
 
-  const filtered = useMemo(() => {
+  const bounds = useMemo(() => {
     let startBound: Date | null = null;
     let endBoundInclusive: Date | null = null;
-
     if (datePreset === "custom" && startDate && endDate) {
       startBound = new Date(`${startDate}T00:00:00`);
       endBoundInclusive = new Date(`${endDate}T23:59:59.999`);
@@ -255,7 +271,11 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
       startBound = start;
       endBoundInclusive = end ? new Date(end.getTime() - 1) : null;
     }
+    return { startBound, endBoundInclusive };
+  }, [datePreset, endDate, startDate]);
 
+  const filtered = useMemo(() => {
+    const { startBound, endBoundInclusive } = bounds;
     const normalizedSearch = search.trim().toLowerCase();
 
     return entries.filter((item) => {
@@ -266,7 +286,7 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
       if (endBoundInclusive && started > endBoundInclusive) {
         return false;
       }
-      if (project !== "all" && item.projectName !== project) {
+      if (projectKey !== "all" && item.projectKey !== projectKey) {
         return false;
       }
       if (team !== "all" && !item.teamNames.includes(team)) {
@@ -283,30 +303,42 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
       }
       return true;
     });
-  }, [author, datePreset, endDate, entries, project, search, startDate, team]);
+  }, [author, bounds, entries, projectKey, search, team]);
 
   const metrics = useMemo(() => {
     const totalHours = filtered.reduce((sum, item) => sum + item.seconds / 3600, 0);
     const days = new Set(filtered.map((item) => toDayKey(new Date(item.started))));
     const issueCount = new Set(filtered.map((item) => item.issueKey)).size;
     const avgDaily = days.size > 0 ? totalHours / days.size : 0;
+    let scopedDays = days.size;
+    if (bounds.startBound && bounds.endBoundInclusive) {
+      scopedDays = Math.max(1, daysBetweenInclusive(bounds.startBound, bounds.endBoundInclusive));
+    }
+    const activeAuthors = [...new Set(filtered.map((item) => item.author))];
+    const dailyTargetHours = activeAuthors.reduce((sum, name) => sum + (contributorTargets[name] ?? 0), 0);
+    const targetHours = dailyTargetHours * scopedDays;
     return {
       totalHours,
       activeDays: days.size,
       issueCount,
       avgDaily,
+      scopedDays,
+      dailyTargetHours,
+      targetHours,
     };
-  }, [filtered]);
+  }, [bounds, contributorTargets, filtered]);
 
   const topProjects = useMemo(() => {
-    const map = new Map<string, number>();
+    const map = new Map<string, { key: string; name: string; hours: number }>();
     for (const item of filtered) {
-      map.set(item.projectName, (map.get(item.projectName) ?? 0) + item.seconds / 3600);
+      const current = map.get(item.projectKey);
+      map.set(item.projectKey, {
+        key: item.projectKey,
+        name: item.projectName,
+        hours: (current?.hours ?? 0) + item.seconds / 3600,
+      });
     }
-    return [...map.entries()]
-      .map(([name, hours]) => ({ name, hours }))
-      .sort((a, b) => b.hours - a.hours)
-      .slice(0, 8);
+    return [...map.values()].sort((a, b) => b.hours - a.hours).slice(0, 8);
   }, [filtered]);
 
   const topAuthors = useMemo(() => {
@@ -327,7 +359,7 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
       const hours = item.seconds / 3600;
       map.set(item.issueKey, {
         summary: item.issueSummary,
-        project: item.projectName,
+        project: `${item.projectKey} - ${item.projectName}`,
         hours: (current?.hours ?? 0) + hours,
       });
     }
@@ -344,11 +376,46 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
     return filtered.filter((entry) => entry.issueKey === selectedIssueKey).sort((a, b) => b.started.localeCompare(a.started));
   }, [filtered, selectedIssueKey]);
 
+  const issueContributorSlices = useMemo(() => {
+    const byAuthor = new Map<string, number>();
+    for (const log of issueWorklogs) {
+      byAuthor.set(log.author, (byAuthor.get(log.author) ?? 0) + log.seconds / 3600);
+    }
+    const colors = ["#0ea5e9", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#14b8a6"];
+    const entries = [...byAuthor.entries()];
+    const total = entries.reduce((sum, [, value]) => sum + value, 0);
+    let offset = 0;
+    return entries.map(([name, value], i) => {
+      const pct = total > 0 ? (value / total) * 100 : 0;
+      const start = offset;
+      offset += pct;
+      return { name, value, color: colors[i % colors.length], start, end: offset };
+    });
+  }, [issueWorklogs]);
+
+  const issueConicGradient = useMemo(() => {
+    if (issueContributorSlices.length === 0) {
+      return "conic-gradient(#cbd5e1 0% 100%)";
+    }
+    const stops = issueContributorSlices
+      .map((slice) => `${slice.color} ${slice.start}% ${slice.end}%`)
+      .join(", ");
+    return `conic-gradient(${stops})`;
+  }, [issueContributorSlices]);
+
   const trend = useMemo(() => buildTrendPoints(filtered), [filtered]);
   const heatmap = useMemo(() => buildHeatmap(filtered), [filtered]);
-  const trendPath = useMemo(() => polylinePath(trend.map((t) => t.hours), 760, 160), [trend]);
+  const trendMax = useMemo(
+    () => Math.max(1, ...trend.map((t) => t.hours), metrics.dailyTargetHours),
+    [metrics.dailyTargetHours, trend]
+  );
+  const trendPath = useMemo(() => polylinePath(trend.map((t) => t.hours), 760, 160, trendMax), [trend, trendMax]);
+  const trendTargetPath = useMemo(
+    () => polylinePath(trend.map(() => metrics.dailyTargetHours), 760, 160, trendMax),
+    [metrics.dailyTargetHours, trend, trendMax]
+  );
 
-  const strongestProject = topProjects[0]?.name ?? "n/a";
+  const strongestProject = topProjects[0] ? `${topProjects[0].key} - ${topProjects[0].name}` : "n/a";
   const strongestAuthor = topAuthors[0]?.name ?? "n/a";
 
   return (
@@ -413,9 +480,15 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
             </div>
             <div className="col-span-1">
               <p className="mb-2 text-xs uppercase tracking-widest text-slate-600 dark:text-slate-400">Project</p>
-              <Select value={project} onValueChange={setProject}>
+              <Select value={projectKey} onValueChange={setProjectKey}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>{projects.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent>
+                <SelectContent>
+                  {projects.map((item) => (
+                    <SelectItem key={item.key} value={item.key}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
               </Select>
             </div>
             <div className="col-span-1">
@@ -462,35 +535,88 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
           </CardContent>
         </Card>
 
-        <section className="grid grid-cols-4 gap-4">
+        <section className="grid grid-cols-5 gap-4">
           <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40"><CardHeader className="pb-1"><CardTitle className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300"><Timer className="h-4 w-4 text-amber-500 dark:text-amber-300" />Total Hours</CardTitle></CardHeader><CardContent className="text-3xl font-semibold">{hourFormat(metrics.totalHours)}</CardContent></Card>
-          <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40"><CardHeader className="pb-1"><CardTitle className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300"><CalendarDays className="h-4 w-4 text-cyan-500 dark:text-cyan-300" />Active Days</CardTitle></CardHeader><CardContent className="text-3xl font-semibold">{metrics.activeDays}</CardContent></Card>
+          <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40"><CardHeader className="pb-1"><CardTitle className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300"><CalendarDays className="h-4 w-4 text-cyan-500 dark:text-cyan-300" />Days In Scope</CardTitle></CardHeader><CardContent className="text-3xl font-semibold">{metrics.scopedDays}</CardContent></Card>
           <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40"><CardHeader className="pb-1"><CardTitle className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300"><ListChecks className="h-4 w-4 text-emerald-500 dark:text-emerald-300" />Tickets Touched</CardTitle></CardHeader><CardContent className="text-3xl font-semibold">{metrics.issueCount}</CardContent></Card>
-          <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40"><CardHeader className="pb-1"><CardTitle className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300"><BarChart3 className="h-4 w-4 text-fuchsia-500 dark:text-fuchsia-300" />Avg / Active Day</CardTitle></CardHeader><CardContent className="text-3xl font-semibold">{hourFormat(metrics.avgDaily)}</CardContent></Card>
+          <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40"><CardHeader className="pb-1"><CardTitle className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300"><BarChart3 className="h-4 w-4 text-fuchsia-500 dark:text-fuchsia-300" />Daily Target Sum</CardTitle></CardHeader><CardContent className="text-3xl font-semibold">{hourFormat(metrics.dailyTargetHours)}</CardContent></Card>
+          <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40"><CardHeader className="pb-1"><CardTitle className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300"><BarChart3 className="h-4 w-4 text-indigo-500 dark:text-indigo-300" />Target vs Actual</CardTitle></CardHeader><CardContent className="space-y-1"><div className="text-xl font-semibold">{hourFormat(metrics.totalHours)} / {hourFormat(metrics.targetHours)}</div><div className="h-2 overflow-hidden rounded bg-slate-300 dark:bg-slate-800"><div className="h-full bg-gradient-to-r from-indigo-300 via-cyan-300 to-emerald-300" style={{ width: `${metrics.targetHours > 0 ? Math.min((metrics.totalHours / metrics.targetHours) * 100, 100) : 0}%` }} /></div></CardContent></Card>
         </section>
 
         <section className="grid grid-cols-3 gap-4">
-          <Card className="col-span-2 border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40"><CardHeader><CardTitle>Worklog Timeline</CardTitle></CardHeader><CardContent><div className="rounded-xl border border-slate-300 bg-slate-100/90 p-4 dark:border-slate-700/40 dark:bg-slate-900/40"><svg viewBox="0 0 760 190" className="w-full"><defs><linearGradient id="trendLine" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f59e0b" stopOpacity="0.9" /><stop offset="100%" stopColor="#f59e0b" stopOpacity="0.15" /></linearGradient></defs><polyline points={trendPath} fill="none" stroke="url(#trendLine)" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" /></svg></div><p className="mt-3 text-xs text-slate-600 dark:text-slate-400">Showing {trend.length} tracked day(s). Peak project: <strong>{strongestProject}</strong>.</p></CardContent></Card>
-          <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40"><CardHeader><CardTitle>Smart Summary</CardTitle></CardHeader><CardContent className="space-y-3 text-sm text-slate-800 dark:text-slate-200">{summaryMode === "executive" && <><p>{hourFormat(metrics.totalHours)} across {metrics.issueCount} tickets. Largest effort center: <strong>{strongestProject}</strong>.</p><p>Daily throughput: <strong>{hourFormat(metrics.avgDaily)}</strong> over {metrics.activeDays} active days.</p></>}{summaryMode === "delivery" && <><p>Delivery concentration: <strong>{topProjects[0]?.name ?? "n/a"}</strong>, then <strong>{topProjects[1]?.name ?? "n/a"}</strong>.</p><p>Highest ticket effort: <strong>{topIssues[0]?.key ?? "n/a"}</strong> ({hourFormat(topIssues[0]?.hours ?? 0)}).</p></>}{summaryMode === "team" && <><p>Top contributor: <strong>{strongestAuthor}</strong> with <strong>{hourFormat(topAuthors[0]?.hours ?? 0)}</strong>.</p><p>Team filter: {team === "all" ? "All teams" : team}</p></>}</CardContent></Card>
+          <Card className="col-span-2 border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40"><CardHeader><CardTitle>Worklog Timeline</CardTitle></CardHeader><CardContent><div className="rounded-xl border border-slate-300 bg-slate-100/90 p-4 dark:border-slate-700/40 dark:bg-slate-900/40"><svg viewBox="0 0 760 220" className="w-full"><defs><linearGradient id="trendLine" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f59e0b" stopOpacity="0.9" /><stop offset="100%" stopColor="#f59e0b" stopOpacity="0.15" /></linearGradient></defs><line x1="40" y1="170" x2="740" y2="170" stroke="currentColor" opacity="0.35" /><line x1="40" y1="20" x2="40" y2="170" stroke="currentColor" opacity="0.35" /><text x="34" y="170" textAnchor="end" fontSize="10" fill="currentColor">0</text><text x="34" y="95" textAnchor="end" fontSize="10" fill="currentColor">{(trendMax / 2).toFixed(1)}</text><text x="34" y="20" textAnchor="end" fontSize="10" fill="currentColor">{trendMax.toFixed(1)}</text>{trend.length > 0 && <text x="40" y="188" textAnchor="start" fontSize="10" fill="currentColor">{trend[0].day.slice(5)}</text>}{trend.length > 0 && <text x="740" y="188" textAnchor="end" fontSize="10" fill="currentColor">{trend[trend.length - 1].day.slice(5)}</text>}<polyline points={trendPath} fill="none" stroke="url(#trendLine)" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" transform="translate(0,10)" /><polyline points={trendTargetPath} fill="none" stroke="#22c55e" strokeWidth="2" strokeDasharray="5 4" strokeLinejoin="round" strokeLinecap="round" transform="translate(0,10)" /></svg></div><p className="mt-3 text-xs text-slate-600 dark:text-slate-400">Orange = actual, green dashed = summed daily targets. Peak project: <strong>{strongestProject}</strong>.</p></CardContent></Card>
+          <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40"><CardHeader><CardTitle>Smart Summary</CardTitle></CardHeader><CardContent className="space-y-3 text-sm text-slate-800 dark:text-slate-200">{summaryMode === "executive" && <><p>{hourFormat(metrics.totalHours)} across {metrics.issueCount} tickets. Largest effort center: <strong>{strongestProject}</strong>.</p><p>Target comparison: <strong>{hourFormat(metrics.totalHours)}</strong> actual vs <strong>{hourFormat(metrics.targetHours)}</strong> target.</p></>}{summaryMode === "delivery" && <><p>Delivery concentration: <strong>{topProjects[0] ? `${topProjects[0].key} - ${topProjects[0].name}` : "n/a"}</strong>, then <strong>{topProjects[1] ? `${topProjects[1].key} - ${topProjects[1].name}` : "n/a"}</strong>.</p><p>Highest ticket effort: <strong>{topIssues[0]?.key ?? "n/a"}</strong> ({hourFormat(topIssues[0]?.hours ?? 0)}).</p></>}{summaryMode === "team" && <><p>Top contributor: <strong>{strongestAuthor}</strong> with <strong>{hourFormat(topAuthors[0]?.hours ?? 0)}</strong>.</p><p>Team filter: {team === "all" ? "All teams" : team}</p></>}</CardContent></Card>
         </section>
 
         <section className="grid grid-cols-2 gap-4">
-          <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40"><CardHeader><CardTitle className="flex items-center gap-2"><Filter className="h-4 w-4 text-amber-500 dark:text-amber-300" />Project Distribution</CardTitle></CardHeader><CardContent className="space-y-2">{topProjects.map((item) => {const width = (item.hours / Math.max(topProjects[0]?.hours ?? 1, 1)) * 100; return <div key={item.name}><div className="mb-1 flex justify-between text-xs text-slate-700 dark:text-slate-300"><span>{item.name}</span><span>{hourFormat(item.hours)}</span></div><div className="h-2 overflow-hidden rounded bg-slate-300 dark:bg-slate-800"><div className="h-full bg-gradient-to-r from-amber-300 via-orange-300 to-pink-300" style={{ width: `${width}%` }} /></div></div>;})}</CardContent></Card>
+          <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40"><CardHeader><CardTitle className="flex items-center gap-2"><Filter className="h-4 w-4 text-amber-500 dark:text-amber-300" />Project Distribution</CardTitle></CardHeader><CardContent className="space-y-2">{topProjects.map((item) => {const width = (item.hours / Math.max(topProjects[0]?.hours ?? 1, 1)) * 100; return <div key={item.key}><div className="mb-1 flex justify-between text-xs text-slate-700 dark:text-slate-300"><span>{item.key} - {item.name}</span><span>{hourFormat(item.hours)}</span></div><div className="h-2 overflow-hidden rounded bg-slate-300 dark:bg-slate-800"><div className="h-full bg-gradient-to-r from-amber-300 via-orange-300 to-pink-300" style={{ width: `${width}%` }} /></div></div>;})}</CardContent></Card>
           <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40"><CardHeader><CardTitle className="flex items-center gap-2"><Users className="h-4 w-4 text-cyan-500 dark:text-cyan-300" />Contributor Ranking</CardTitle></CardHeader><CardContent className="space-y-2">{topAuthors.map((item, index) => {const width = (item.hours / Math.max(topAuthors[0]?.hours ?? 1, 1)) * 100; return <div key={item.name}><div className="mb-1 flex justify-between text-xs text-slate-700 dark:text-slate-300"><Link href={`/team/${encodeURIComponent(item.name)}`} className="hover:text-cyan-800 hover:underline dark:hover:text-cyan-200">#{index + 1} {item.name}</Link><span>{hourFormat(item.hours)}</span></div><div className="h-2 overflow-hidden rounded bg-slate-300 dark:bg-slate-800"><div className="h-full bg-gradient-to-r from-cyan-300 via-sky-300 to-indigo-300" style={{ width: `${width}%` }} /></div></div>;})}</CardContent></Card>
         </section>
 
         <section className="grid grid-cols-3 gap-4">
-          <Card className="col-span-2 border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40"><CardHeader><CardTitle>High-Effort Issues (click for worklog text)</CardTitle></CardHeader><CardContent><div className="overflow-hidden rounded border border-slate-300 dark:border-slate-700/40"><table className="w-full text-left text-sm"><thead className="bg-slate-200/90 text-xs uppercase tracking-widest text-slate-600 dark:bg-slate-900/80 dark:text-slate-400"><tr><th className="px-3 py-2">Issue</th><th className="px-3 py-2">Project</th><th className="px-3 py-2">Hours</th><th className="px-3 py-2">Summary</th></tr></thead><tbody>{topIssues.map((item) => <tr key={item.key} className="cursor-pointer border-t border-slate-300 hover:bg-slate-100 dark:border-slate-800/80 dark:hover:bg-slate-900/50" onClick={() => setSelectedIssueKey(item.key)}><td className="px-3 py-2 font-mono text-xs text-amber-700 dark:text-amber-200">{jiraBrowseUrl ? <a className="inline-flex items-center gap-1 hover:text-amber-900 hover:underline dark:hover:text-amber-100" href={`${jiraBrowseUrl}/browse/${item.key}`} target="_blank" rel="noreferrer noopener" onClick={(event) => event.stopPropagation()}>{item.key}<Link2 className="h-3 w-3" /></a> : item.key}</td><td className="px-3 py-2 text-slate-800 dark:text-slate-200">{item.project}</td><td className="px-3 py-2 text-slate-800 dark:text-slate-200">{hourFormat(item.hours)}</td><td className="truncate px-3 py-2 text-slate-700 dark:text-slate-300">{item.summary}</td></tr>)}</tbody></table></div></CardContent></Card>
+          <Card className="col-span-2 border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40"><CardHeader><CardTitle>High-Effort Issues (click for details)</CardTitle></CardHeader><CardContent><div className="overflow-hidden rounded border border-slate-300 dark:border-slate-700/40"><table className="w-full text-left text-sm"><thead className="bg-slate-200/90 text-xs uppercase tracking-widest text-slate-600 dark:bg-slate-900/80 dark:text-slate-400"><tr><th className="px-3 py-2">Issue</th><th className="px-3 py-2">Project</th><th className="px-3 py-2">Hours</th><th className="px-3 py-2">Summary</th></tr></thead><tbody>{topIssues.map((item) => <tr key={item.key} className="cursor-pointer border-t border-slate-300 hover:bg-slate-100 dark:border-slate-800/80 dark:hover:bg-slate-900/50" onClick={() => setSelectedIssueKey(item.key)}><td className="px-3 py-2 font-mono text-xs text-amber-700 dark:text-amber-200">{jiraBrowseUrl ? <a className="inline-flex items-center gap-1 hover:text-amber-900 hover:underline dark:hover:text-amber-100" href={`${jiraBrowseUrl}/browse/${item.key}`} target="_blank" rel="noreferrer noopener" onClick={(event) => event.stopPropagation()}>{item.key}<Link2 className="h-3 w-3" /></a> : item.key}</td><td className="px-3 py-2 text-slate-800 dark:text-slate-200">{item.project}</td><td className="px-3 py-2 text-slate-800 dark:text-slate-200">{hourFormat(item.hours)}</td><td className="truncate px-3 py-2 text-slate-700 dark:text-slate-300">{item.summary}</td></tr>)}</tbody></table></div></CardContent></Card>
           <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40"><CardHeader><CardTitle>Weekday Heatmap (Mon-Sun)</CardTitle></CardHeader><CardContent><div className="space-y-2"><div className="grid grid-cols-7 gap-1 text-center text-[10px] uppercase tracking-wider text-slate-600 dark:text-slate-400">{heatmap.labels.map((label) => <span key={label}>{label}</span>)}</div>{heatmap.rows.map((week) => <div key={week.week} className="grid grid-cols-7 gap-1">{week.values.map((hours, index) => {const intensity = Math.min(hours / 8, 1); return <div key={`${week.week}-${index}`} title={`${week.week} day ${index + 1}: ${hourFormat(hours)}`} className="h-5 rounded" style={{ backgroundColor: `rgba(34, 211, 238, ${0.12 + intensity * 0.78})` }} />;})}</div>)}</div></CardContent></Card>
         </section>
       </div>
 
       <Dialog open={Boolean(selectedIssueKey)} onOpenChange={(open) => (!open ? setSelectedIssueKey(null) : undefined)}>
-        <DialogContent className="max-w-4xl">
-          <DialogHeader><DialogTitle>Worklog Detail: {selectedIssueKey}</DialogTitle></DialogHeader>
-          <div className="max-h-[60vh] overflow-auto rounded border border-slate-300 p-3 dark:border-slate-700"><div className="space-y-3">{issueWorklogs.map((entry) => <div key={entry.id} className="rounded border border-slate-300 bg-slate-100/80 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/50"><div className="mb-1 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400"><span>{new Date(entry.started).toLocaleString()}</span><span>{entry.author}</span><span>{hourFormat(entry.seconds / 3600)}</span></div><p className="text-slate-800 dark:text-slate-200">{entry.comment || "(No worklog text provided)"}</p></div>)}</div></div>
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>Issue Details: {selectedIssueKey}</DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-3 gap-4">
+            <Card className="col-span-1 border-slate-300 dark:border-slate-700">
+              <CardHeader>
+                <CardTitle className="text-base">Contributors</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="mx-auto h-44 w-44 rounded-full" style={{ background: issueConicGradient }} />
+                <div className="space-y-1 text-xs">
+                  {issueContributorSlices.map((slice) => (
+                    <div key={slice.name} className="flex items-center justify-between">
+                      <span className="flex items-center gap-2">
+                        <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: slice.color }} />
+                        {slice.name}
+                      </span>
+                      <span>{hourFormat(slice.value)}</span>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="col-span-2 border-slate-300 dark:border-slate-700">
+              <CardHeader>
+                <CardTitle className="text-base">All Logs & Stats</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-3 gap-2 text-sm">
+                  <div className="rounded border p-2">Entries: <strong>{issueWorklogs.length}</strong></div>
+                  <div className="rounded border p-2">
+                    Total: <strong>{hourFormat(issueWorklogs.reduce((s, e) => s + e.seconds / 3600, 0))}</strong>
+                  </div>
+                  <div className="rounded border p-2">
+                    Contributors: <strong>{new Set(issueWorklogs.map((e) => e.author)).size}</strong>
+                  </div>
+                </div>
+                <div className="max-h-[42vh] space-y-2 overflow-auto">
+                  {issueWorklogs.map((entry) => (
+                    <div key={entry.id} className="rounded border border-slate-300 bg-slate-100/80 p-3 text-sm dark:border-slate-700 dark:bg-slate-900/50">
+                      <div className="mb-1 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
+                        <span>{new Date(entry.started).toLocaleString()}</span>
+                        <span>{entry.author}</span>
+                        <span>{hourFormat(entry.seconds / 3600)}</span>
+                      </div>
+                      <p className="text-slate-800 dark:text-slate-200">{entry.comment || "(No worklog text provided)"}</p>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </DialogContent>
       </Dialog>
     </div>
   );
 }
+
+

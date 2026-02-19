@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, Link2, Timer } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, Link2, Timer } from "lucide-react";
 import { hasValidSessionCookie } from "@/lib/auth";
 import { fetchJiraWorklogs } from "@/lib/jira";
 import { isSupabaseConfigured } from "@/lib/supabase-admin";
@@ -30,6 +30,25 @@ function getMonthBounds(monthIso: string): { start: Date; end: Date } {
   return { start, end };
 }
 
+function shiftMonth(monthIso: string, delta: number): string {
+  const [year, month] = monthIso.split("-").map(Number);
+  const date = new Date(year, month - 1 + delta, 1);
+  return date.toISOString().slice(0, 7);
+}
+
+function countWeekdays(start: Date, end: Date): number {
+  const current = new Date(start);
+  let count = 0;
+  while (current <= end) {
+    const day = current.getDay();
+    if (day >= 1 && day <= 5) {
+      count += 1;
+    }
+    current.setDate(current.getDate() + 1);
+  }
+  return count;
+}
+
 export default async function TeamMemberPage({ params, searchParams }: Props) {
   const isAuthed = await hasValidSessionCookie();
   if (!isAuthed) {
@@ -50,9 +69,7 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
   }
 
   const targets = isSupabaseConfigured() ? await readContributorTargets() : {};
-  const targetHoursMonth = targets[member] ?? 160;
-  const workingDays = 20;
-  const dailyTarget = targetHoursMonth / workingDays;
+  const dailyTarget = targets[member] ?? 8;
 
   const jiraBrowseUrl = (process.env.JIRA_BASE_URL ?? "").replace(/\/+$/, "");
   const totalHours = memberEntries.reduce((sum, item) => sum + item.seconds / 3600, 0);
@@ -78,6 +95,8 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
     .slice(0, 20);
 
   const { start, end } = getMonthBounds(month);
+  const weekdaysInMonth = countWeekdays(start, end);
+  const targetHoursMonth = dailyTarget * weekdaysInMonth;
   const monthTotal = [...dayHours.entries()]
     .filter(([key]) => {
       const d = new Date(`${key}T00:00:00`);
@@ -106,7 +125,7 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
         <header className="rounded-2xl border border-slate-300/80 bg-white/85 p-6 dark:border-slate-700/50 dark:bg-slate-950/50">
           <p className="font-mono text-xs uppercase tracking-[0.3em] text-emerald-700 dark:text-emerald-300">Contributor Drilldown</p>
           <h1 className="mt-2 text-4xl font-semibold">{member}</h1>
-          <div className="mt-4 flex flex-wrap gap-3">
+          <div className="mt-4 flex flex-wrap items-center gap-3">
             <ModeToggle />
             <Button asChild variant="secondary">
               <Link href="/">
@@ -117,6 +136,22 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
             <form action="/api/auth/logout" method="post">
               <Button variant="outline">Sign out</Button>
             </form>
+            <div className="ml-auto flex items-center gap-2">
+              <Button asChild variant="outline" size="icon">
+                <Link href={`/team/${encodeURIComponent(member)}?month=${shiftMonth(month, -1)}`}>
+                  <ChevronLeft className="h-4 w-4" />
+                </Link>
+              </Button>
+              <form method="get" className="flex items-center gap-2">
+                <Input name="month" type="month" defaultValue={month} className="w-44" />
+                <Button type="submit" variant="outline">Go</Button>
+              </form>
+              <Button asChild variant="outline" size="icon">
+                <Link href={`/team/${encodeURIComponent(member)}?month=${shiftMonth(month, 1)}`}>
+                  <ChevronRight className="h-4 w-4" />
+                </Link>
+              </Button>
+            </div>
           </div>
         </header>
 
@@ -171,25 +206,25 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
                   Invalid target hours.
                 </p>
               )}
+              {targetStatus === "error" && (
+                <p className="rounded border border-rose-400/60 bg-rose-100 px-3 py-2 text-rose-900 dark:bg-rose-900/20 dark:text-rose-200">
+                  Could not save target to DB.
+                </p>
+              )}
               <form action="/api/targets" method="post" className="space-y-2">
                 <input type="hidden" name="author" value={member} />
                 <input type="hidden" name="redirectTo" value={`/team/${encodeURIComponent(member)}?month=${month}`} />
-                <label className="text-xs uppercase tracking-wider text-slate-600 dark:text-slate-400">Monthly target hours</label>
-                <Input name="targetHours" type="number" min={0} max={400} step="0.5" defaultValue={targetHoursMonth} />
+                <label className="text-xs uppercase tracking-wider text-slate-600 dark:text-slate-400">Daily target hours</label>
+                <Input name="targetHours" type="number" min={0} max={24} step="0.25" defaultValue={dailyTarget} />
                 <Button type="submit" className="w-full">Save Target</Button>
               </form>
-              <form method="get" className="space-y-2">
-                <label className="text-xs uppercase tracking-wider text-slate-600 dark:text-slate-400">Calendar month</label>
-                <Input name="month" type="month" defaultValue={month} />
-                <Button type="submit" variant="outline" className="w-full">Load Month</Button>
-              </form>
-              <p className="text-xs text-slate-600 dark:text-slate-400">Daily target baseline: {hourFormat(dailyTarget)}</p>
+              <p className="text-xs text-slate-600 dark:text-slate-400">Month target (calculated): {hourFormat(targetHoursMonth)}</p>
             </CardContent>
           </Card>
 
           <Card className="col-span-2 border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40">
             <CardHeader>
-              <CardTitle>Worklog Calendar (Monday First)</CardTitle>
+              <CardTitle>Worklog Calendar</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
               <div className="grid grid-cols-7 gap-2 text-center text-xs uppercase tracking-wider text-slate-600 dark:text-slate-400">

@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { hasValidSessionCookie } from "@/lib/auth";
 import { fetchJiraWorklogs, type WorklogEntry } from "@/lib/jira";
 import { isSupabaseConfigured } from "@/lib/supabase-admin";
-import { readAllWorklogs, upsertWorklogs } from "@/lib/worklog-store";
+import { readAllWorklogs, readContributorTargets, upsertWorklogs } from "@/lib/worklog-store";
 import { WorklogDashboard } from "@/components/worklog-dashboard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,9 +23,11 @@ export default async function HomePage({ searchParams }: Props) {
     const syncStatus = typeof params.sync === "string" ? params.sync : undefined;
     const dbEnabled = isSupabaseConfigured();
     let entries: WorklogEntry[] = [];
+    let contributorTargets: Record<string, number> = {};
 
     if (dbEnabled) {
       entries = await readAllWorklogs();
+      contributorTargets = await readContributorTargets();
       if (entries.length === 0) {
         const fresh = await fetchJiraWorklogs();
         await upsertWorklogs(fresh);
@@ -75,6 +77,7 @@ export default async function HomePage({ searchParams }: Props) {
         </div>
         <WorklogDashboard
           entries={entries}
+          contributorTargets={contributorTargets}
           jiraBrowseUrl={jiraBrowseUrl}
           syncEnabled={dbEnabled}
           syncStatus={syncStatus}
