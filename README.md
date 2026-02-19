@@ -4,6 +4,59 @@
 
 This template uses [Claude Code](https://docs.anthropic.com/en/docs/claude-code) with modern Skills, Rules, and Sub-Agents to provide a complete AI-powered development workflow.
 
+## Jira Worklog Dashboard POC (Implemented)
+
+This fork now includes a password-protected, desktop-focused Jira Worklog dashboard at `/`.
+
+### Setup
+
+1. Copy `.env.local.example` to `.env.local`.
+2. Fill:
+   - `WORKLOG_APP_PASSWORD`
+   - `WORKLOG_SESSION_SECRET`
+   - `JIRA_BASE_URL`
+   - `JIRA_EMAIL`
+   - `JIRA_API_TOKEN`
+   - `SUPABASE_URL`
+   - `SUPABASE_SERVICE_ROLE_KEY`
+3. In Supabase SQL Editor, run:
+
+```sql
+-- file: docs/supabase-jira-worklogs.sql
+```
+
+4. Optional tuning:
+   - `JIRA_JQL` (default is `worklogDate >= startOfMonth(-2)`)
+   - `JIRA_MAX_ISSUES` (default `100`)
+5. Run:
+
+```bash
+npm install
+npm run dev
+```
+
+Then open `http://localhost:3000/login`, enter the app password, and access the dashboard.
+
+### Data Flow
+
+- Dashboard reads from Supabase table `jira_worklogs` (primary store).
+- First run auto-seeds DB from Jira if table is empty.
+- Manual sync is available via `Sync Jira Now` button (calls `/api/sync`).
+- If Supabase env vars are missing, app falls back to direct Jira API reads.
+
+### Public Fork Safety
+
+- Never commit `.env` or `.env.local`.
+- Keep all credentials only in local environment and Vercel Project Environment Variables.
+- `SUPABASE_SERVICE_ROLE_KEY` must stay server-side only (do not prefix with `NEXT_PUBLIC_`).
+
+### Vercel Deploy From GitHub
+
+1. Import this GitHub repo in Vercel.
+2. Set Framework to Next.js (auto-detected).
+3. Add all env vars from `.env.local.example` in Vercel Project Settings.
+4. Deploy. Each push to your selected branch triggers a new deployment.
+
 ## Quick Start
 
 ### 1. Clone & Install
