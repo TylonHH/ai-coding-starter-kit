@@ -20,6 +20,7 @@ export async function POST(request: Request) {
   if (typeof author !== "string" || !author.trim()) {
     return NextResponse.redirect(new URL("/", request.url));
   }
+  const normalizedAuthor = author.trim();
 
   const parsed = Number(targetHours);
   const base = typeof redirectTo === "string" ? redirectTo : "/";
@@ -31,11 +32,13 @@ export async function POST(request: Request) {
   }
 
   try {
-    await upsertContributorTarget(author, parsed);
+    await upsertContributorTarget(normalizedAuthor, parsed);
     redirectUrl.searchParams.set("target", "ok");
     return NextResponse.redirect(redirectUrl);
-  } catch {
+  } catch (error) {
     redirectUrl.searchParams.set("target", "error");
+    const message = error instanceof Error ? error.message : "Unknown error";
+    redirectUrl.searchParams.set("targetMessage", message.slice(0, 200));
     return NextResponse.redirect(redirectUrl);
   }
 }

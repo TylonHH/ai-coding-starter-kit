@@ -23,6 +23,10 @@ function dayKey(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
 
+function normalizeAuthorKey(value: string): string {
+  return value.trim().toLowerCase();
+}
+
 function getMonthBounds(monthIso: string): { start: Date; end: Date } {
   const [year, month] = monthIso.split("-").map(Number);
   const start = new Date(year, month - 1, 1);
@@ -60,6 +64,7 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
   const query = searchParams ? await searchParams : {};
   const month = typeof query.month === "string" ? query.month : new Date().toISOString().slice(0, 7);
   const targetStatus = typeof query.target === "string" ? query.target : "";
+  const targetMessage = typeof query.targetMessage === "string" ? query.targetMessage : "";
 
   const entries = isSupabaseConfigured() ? await readAllWorklogs() : await fetchJiraWorklogs();
   const memberEntries = entries.filter((item) => item.author === member);
@@ -69,7 +74,10 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
   }
 
   const targets = isSupabaseConfigured() ? await readContributorTargets() : {};
-  const dailyTarget = targets[member] ?? 8;
+  const normalizedTargetMap = new Map(
+    Object.entries(targets).map(([name, hours]) => [normalizeAuthorKey(name), hours])
+  );
+  const dailyTarget = targets[member] ?? normalizedTargetMap.get(normalizeAuthorKey(member)) ?? 8;
 
   const jiraBrowseUrl = (process.env.JIRA_BASE_URL ?? "").replace(/\/+$/, "");
   const totalHours = memberEntries.reduce((sum, item) => sum + item.seconds / 3600, 0);
@@ -209,6 +217,7 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
               {targetStatus === "error" && (
                 <p className="rounded border border-rose-400/60 bg-rose-100 px-3 py-2 text-rose-900 dark:bg-rose-900/20 dark:text-rose-200">
                   Could not save target to DB.
+                  {targetMessage ? ` ${targetMessage}` : ""}
                 </p>
               )}
               <form action="/api/targets" method="post" className="space-y-2">

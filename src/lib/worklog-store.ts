@@ -177,9 +177,10 @@ export async function readContributorTargets(): Promise<Record<string, number>> 
 
 export async function upsertContributorTarget(author: string, targetHours: number): Promise<void> {
   const supabase = getSupabaseAdmin();
+  const normalizedAuthor = author.trim();
   const { error } = await supabase.from("jira_contributor_targets").upsert(
     {
-      author,
+      author: normalizedAuthor,
       target_hours: targetHours,
       updated_at: new Date().toISOString(),
     },

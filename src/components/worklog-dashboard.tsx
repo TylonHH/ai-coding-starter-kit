@@ -41,6 +41,10 @@ function hourFormat(hours: number): string {
   return `${hours.toFixed(1)}h`;
 }
 
+function normalizeAuthorKey(value: string): string {
+  return value.trim().toLowerCase();
+}
+
 function toDayKey(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
@@ -314,8 +318,14 @@ export function WorklogDashboard({ entries, contributorTargets, jiraBrowseUrl, s
     if (bounds.startBound && bounds.endBoundInclusive) {
       scopedDays = Math.max(1, daysBetweenInclusive(bounds.startBound, bounds.endBoundInclusive));
     }
+    const normalizedTargets = new Map(
+      Object.entries(contributorTargets).map(([name, hours]) => [normalizeAuthorKey(name), hours])
+    );
     const activeAuthors = [...new Set(filtered.map((item) => item.author))];
-    const dailyTargetHours = activeAuthors.reduce((sum, name) => sum + (contributorTargets[name] ?? 0), 0);
+    const dailyTargetHours = activeAuthors.reduce(
+      (sum, name) => sum + (contributorTargets[name] ?? normalizedTargets.get(normalizeAuthorKey(name)) ?? 0),
+      0
+    );
     const targetHours = dailyTargetHours * scopedDays;
     return {
       totalHours,
