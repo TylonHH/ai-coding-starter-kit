@@ -78,12 +78,16 @@ function formatSyncDateTime(value: string): string {
   });
 }
 
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
 function toDayKey(date: Date): string {
-  return date.toISOString().slice(0, 10);
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
 }
 
 function toInputDate(date: Date): string {
-  return date.toISOString().slice(0, 10);
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
 }
 
 function daysBetweenInclusive(start: Date, end: Date): number {
