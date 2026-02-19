@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { BarChart3, CalendarDays, Filter, Link2, ListChecks, Save, Timer, Trash2, Users } from "lucide-react";
+import { BarChart3, CalendarDays, Filter, Link2, ListChecks, Timer, Users } from "lucide-react";
 import type { WorklogEntry } from "@/lib/jira";
 import { ModeToggle } from "@/components/mode-toggle";
 import { Button } from "@/components/ui/button";
@@ -15,8 +15,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 type DatePreset = "last7" | "last30" | "lastWeek" | "lastMonth" | "ytd" | "all" | "custom";
 type SummaryMode = "executive" | "delivery" | "team";
 
-type Preset = {
-  name: string;
+type DashboardState = {
   datePreset: DatePreset;
   startDate: string;
   endDate: string;
@@ -34,9 +33,9 @@ type Props = {
   syncEnabled: boolean;
   syncStatus?: string;
   syncMessage?: string;
+  syncAt?: string;
+  viewerStorageKey: string;
 };
-
-const PRESET_STORAGE_KEY = "jira-worklog-presets-v3";
 
 function hourFormat(hours: number): string {
   return `${hours.toFixed(1)}h`;
@@ -61,6 +60,20 @@ function formatDayEu(dayIso: string): string {
     return dayIso;
   }
   return date.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
+}
+
+function formatSyncDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleString("de-DE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function toDayKey(date: Date): string {
@@ -177,7 +190,16 @@ function polylinePath(
     .join(" ");
 }
 
-export function WorklogDashboard({ entries, contributorTargets, jiraBrowseUrl, syncEnabled, syncStatus, syncMessage }: Props) {
+export function WorklogDashboard({
+  entries,
+  contributorTargets,
+  jiraBrowseUrl,
+  syncEnabled,
+  syncStatus,
+  syncMessage,
+  syncAt,
+  viewerStorageKey,
+}: Props) {
   const [datePreset, setDatePreset] = useState<DatePreset>("last30");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -186,13 +208,18 @@ export function WorklogDashboard({ entries, contributorTargets, jiraBrowseUrl, s
   const [author, setAuthor] = useState("all");
   const [search, setSearch] = useState("");
   const [summaryMode, setSummaryMode] = useState<SummaryMode>("executive");
-  const [presets, setPresets] = useState<Preset[]>([]);
-  const [selectedPreset, setSelectedPreset] = useState<string>("none");
-  const [presetName, setPresetName] = useState("");
   const [selectedIssueKey, setSelectedIssueKey] = useState<string | null>(null);
   const [selectedTrendDay, setSelectedTrendDay] = useState<string | null>(null);
+  const [isStateLoaded, setIsStateLoaded] = useState(false);
+  const [latestSyncAt, setLatestSyncAt] = useState<string>("");
+
+  const dashboardStateStorageKey = `jira-worklog-dashboard-state-v1-${viewerStorageKey}`;
+  const latestSyncStorageKey = `jira-worklog-last-sync-v1-${viewerStorageKey}`;
 
   useEffect(() => {
+    if (!isStateLoaded) {
+      return;
+    }
     const { start, end } = getPresetRange(datePreset);
     if (start && end) {
       setStartDate(toInputDate(start));
@@ -201,35 +228,60 @@ export function WorklogDashboard({ entries, contributorTargets, jiraBrowseUrl, s
       setStartDate("");
       setEndDate("");
     }
-  }, [datePreset]);
+  }, [datePreset, isStateLoaded]);
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(PRESET_STORAGE_KEY);
-      if (!raw) {
-        return;
+      const rawState = localStorage.getItem(dashboardStateStorageKey);
+      if (rawState) {
+        const parsed = JSON.parse(rawState) as Partial<DashboardState>;
+        if (parsed.datePreset && ["last7", "last30", "lastWeek", "lastMonth", "ytd", "all", "custom"].includes(parsed.datePreset)) {
+          setDatePreset(parsed.datePreset as DatePreset);
+        }
+        if (typeof parsed.startDate === "string") {
+          setStartDate(parsed.startDate);
+        }
+        if (typeof parsed.endDate === "string") {
+          setEndDate(parsed.endDate);
+        }
+        if (typeof parsed.projectKey === "string" && parsed.projectKey.trim()) {
+          setProjectKey(parsed.projectKey);
+        }
+        if (typeof parsed.team === "string" && parsed.team.trim()) {
+          setTeam(parsed.team);
+        }
+        if (typeof parsed.author === "string" && parsed.author.trim()) {
+          setAuthor(parsed.author);
+        }
+        if (typeof parsed.search === "string") {
+          setSearch(parsed.search);
+        }
+        if (parsed.summaryMode && ["executive", "delivery", "team"].includes(parsed.summaryMode)) {
+          setSummaryMode(parsed.summaryMode as SummaryMode);
+        }
       }
-      const parsed = JSON.parse(raw) as Preset[];
-      if (Array.isArray(parsed)) {
-        setPresets(parsed);
+
+      const storedSync = localStorage.getItem(latestSyncStorageKey);
+      if (storedSync && storedSync.trim()) {
+        setLatestSyncAt(storedSync);
+      }
+
+      if (syncAt && syncAt.trim()) {
+        localStorage.setItem(latestSyncStorageKey, syncAt);
+        setLatestSyncAt(syncAt);
       }
     } catch {
-      setPresets([]);
+      setLatestSyncAt(syncAt ?? "");
+    } finally {
+      setIsStateLoaded(true);
     }
-  }, []);
+  }, [dashboardStateStorageKey, latestSyncStorageKey, syncAt]);
 
-  function persistPreset(nextPresets: Preset[]) {
-    setPresets(nextPresets);
-    localStorage.setItem(PRESET_STORAGE_KEY, JSON.stringify(nextPresets));
-  }
-
-  function saveCurrentPreset() {
-    const finalName = presetName.trim();
-    if (!finalName) {
+  useEffect(() => {
+    if (!isStateLoaded) {
       return;
     }
-    const nextPreset: Preset = {
-      name: finalName,
+    const payload: DashboardState = {
       datePreset,
       startDate,
       endDate,
@@ -239,40 +291,27 @@ export function WorklogDashboard({ entries, contributorTargets, jiraBrowseUrl, s
       search,
       summaryMode,
     };
-    const nextPresets = [nextPreset, ...presets.filter((item) => item.name !== finalName)].slice(0, 15);
-    persistPreset(nextPresets);
-    setSelectedPreset(finalName);
-    setPresetName("");
-  }
+    try {
+      localStorage.setItem(dashboardStateStorageKey, JSON.stringify(payload));
+    } catch {
+      // ignore storage errors
+    }
+  }, [author, dashboardStateStorageKey, datePreset, endDate, isStateLoaded, projectKey, search, startDate, summaryMode, team]);
 
-  function applyPreset(name: string) {
-    if (name === "none") {
-      setSelectedPreset("none");
+  useEffect(() => {
+    if (!isStateLoaded) {
       return;
     }
-    const target = presets.find((item) => item.name === name);
-    if (!target) {
+    if (!syncAt || !syncAt.trim()) {
       return;
     }
-    setDatePreset(target.datePreset);
-    setStartDate(target.startDate);
-    setEndDate(target.endDate);
-    setProjectKey(target.projectKey);
-    setTeam(target.team);
-    setAuthor(target.author);
-    setSearch(target.search);
-    setSummaryMode(target.summaryMode);
-    setSelectedPreset(name);
-  }
-
-  function deleteSelectedPreset() {
-    if (selectedPreset === "none") {
-      return;
+    try {
+      localStorage.setItem(latestSyncStorageKey, syncAt);
+    } catch {
+      // ignore storage errors
     }
-    const nextPresets = presets.filter((item) => item.name !== selectedPreset);
-    persistPreset(nextPresets);
-    setSelectedPreset("none");
-  }
+    setLatestSyncAt(syncAt);
+  }, [isStateLoaded, latestSyncStorageKey, syncAt]);
 
   const projects = useMemo(() => {
     const map = new Map<string, string>();
@@ -518,6 +557,18 @@ export function WorklogDashboard({ entries, contributorTargets, jiraBrowseUrl, s
   const strongestProject = topProjects[0] ? `${topProjects[0].key} - ${topProjects[0].name}` : "n/a";
   const strongestAuthor = topAuthors[0]?.name ?? "n/a";
 
+  if (!isStateLoaded) {
+    return (
+      <div className="hidden min-h-screen bg-[radial-gradient(circle_at_top_right,_#f8fafc_0%,_#e2e8f0_48%,_#cbd5e1_100%)] p-8 text-slate-900 dark:bg-[radial-gradient(circle_at_top_right,_#2a3f57_0%,_#111827_45%,_#05070b_100%)] dark:text-slate-100 lg:block">
+        <div className="mx-auto max-w-[1440px]">
+          <Card className="border-slate-300/80 bg-white/85 dark:border-slate-700/50 dark:bg-slate-950/40">
+            <CardContent className="p-6 text-sm text-slate-700 dark:text-slate-300">Loading your saved dashboard settings...</CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="hidden min-h-screen bg-[radial-gradient(circle_at_top_right,_#f8fafc_0%,_#e2e8f0_48%,_#cbd5e1_100%)] p-8 text-slate-900 dark:bg-[radial-gradient(circle_at_top_right,_#2a3f57_0%,_#111827_45%,_#05070b_100%)] dark:text-slate-100 lg:block">
       <div className="mx-auto flex max-w-[1440px] flex-col gap-6">
@@ -527,16 +578,23 @@ export function WorklogDashboard({ entries, contributorTargets, jiraBrowseUrl, s
             <h1 className="mt-2 text-4xl font-semibold tracking-tight">Operations Intelligence Dashboard</h1>
             <p className="mt-2 max-w-2xl text-sm text-slate-700 dark:text-slate-300">Filter by teams, contributors, projects, and custom date windows. Click any ticket to inspect full worklog text details.</p>
           </div>
-          <div className="flex items-center gap-2">
-            <ModeToggle />
-            {syncEnabled && (
-              <form action="/api/sync" method="post">
-                <Button variant="outline" className="border border-emerald-500/60 text-emerald-800 hover:bg-emerald-100 dark:text-emerald-200 dark:hover:bg-emerald-900/20">Sync Jira Now</Button>
+          <div className="flex flex-col items-end gap-2">
+            <div className="flex items-center gap-2">
+              <ModeToggle />
+              {syncEnabled && (
+                <form action="/api/sync" method="post">
+                  <Button variant="outline" className="border border-emerald-500/60 text-emerald-800 hover:bg-emerald-100 dark:text-emerald-200 dark:hover:bg-emerald-900/20">Sync Jira Now</Button>
+                </form>
+              )}
+              <form action="/api/auth/logout" method="post">
+                <Button variant="secondary" className="border border-slate-400 bg-slate-100/80 text-slate-900 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-900/50 dark:text-slate-100 dark:hover:bg-slate-800">Sign out</Button>
               </form>
+            </div>
+            {syncEnabled && (
+              <p className="text-xs text-slate-600 dark:text-slate-400">
+                Latest sync: {latestSyncAt ? formatSyncDateTime(latestSyncAt) : "not synced yet"}
+              </p>
             )}
-            <form action="/api/auth/logout" method="post">
-              <Button variant="secondary" className="border border-slate-400 bg-slate-100/80 text-slate-900 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-900/50 dark:text-slate-100 dark:hover:bg-slate-800">Sign out</Button>
-            </form>
           </div>
         </header>
 
@@ -613,25 +671,6 @@ export function WorklogDashboard({ entries, contributorTargets, jiraBrowseUrl, s
               <p className="mb-2 text-xs uppercase tracking-widest text-slate-600 dark:text-slate-400">Search</p>
               <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search issue key, summary, or worklog text..." />
             </div>
-          </CardContent>
-        </Card>
-
-        <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/30">
-          <CardContent className="grid grid-cols-7 items-end gap-4 p-5">
-            <div className="col-span-2"><p className="mb-2 text-xs uppercase tracking-widest text-slate-600 dark:text-slate-400">Preset name</p><Input value={presetName} onChange={(event) => setPresetName(event.target.value)} placeholder="e.g. Team-Alpha-LastWeek" /></div>
-            <div className="col-span-1"><Button type="button" onClick={saveCurrentPreset} className="w-full bg-emerald-300 text-black hover:bg-emerald-200"><Save className="mr-2 h-4 w-4" />Save</Button></div>
-            <div className="col-span-2">
-              <p className="mb-2 text-xs uppercase tracking-widest text-slate-600 dark:text-slate-400">Saved presets</p>
-              <Select value={selectedPreset} onValueChange={applyPreset}>
-                <SelectTrigger><SelectValue placeholder="Select preset..." /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">None</SelectItem>
-                  {presets.map((item) => <SelectItem key={item.name} value={item.name}>{item.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="col-span-1"><Button type="button" variant="outline" onClick={deleteSelectedPreset} className="w-full"><Trash2 className="mr-2 h-4 w-4" />Delete</Button></div>
-            <div className="col-span-1 text-right text-xs text-slate-600 dark:text-slate-400">Local browser storage only.</div>
           </CardContent>
         </Card>
 

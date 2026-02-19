@@ -509,12 +509,32 @@ async function maybeGenerateAiSuggestionLine(input: AiSuggestionInput): Promise<
     if (!response.ok) {
       return null;
     }
-    const payload = (await response.json()) as { output_text?: string };
-    const text = (payload.output_text ?? "").trim().replace(/\s+/g, " ");
+    const payload = (await response.json()) as {
+      output_text?: string;
+      output?: Array<{
+        content?: Array<{
+          type?: string;
+          text?: string;
+        }>;
+      }>;
+    };
+    const extractedFromOutput = (payload.output ?? [])
+      .flatMap((item) => item.content ?? [])
+      .map((part) => {
+        if (typeof part.text === "string") {
+          return part.text;
+        }
+        return "";
+      })
+      .join(" ")
+      .trim();
+    const text = (payload.output_text ?? extractedFromOutput).trim().replace(/\s+/g, " ");
     if (!text) {
       return null;
     }
-    return text.replace(/[.!?]+$/g, "").trim();
+    const shouldLowercase = /(alles\s+klein|nur\s+klein|kleinbuchstaben|lowercase)/i.test(systemPrompt);
+    const normalized = shouldLowercase ? text.toLocaleLowerCase("de-DE") : text;
+    return normalized.replace(/[.!?]+$/g, "").trim();
   } catch {
     return null;
   }

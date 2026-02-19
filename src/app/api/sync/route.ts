@@ -17,7 +17,9 @@ export async function POST(request: Request) {
   try {
     const worklogs = await fetchJiraWorklogs();
     await upsertWorklogs(worklogs);
-    return NextResponse.redirect(new URL("/?sync=ok", request.url));
+    const redirectUrl = new URL("/?sync=ok", request.url);
+    redirectUrl.searchParams.set("syncAt", new Date().toISOString());
+    return NextResponse.redirect(redirectUrl);
   } catch (error) {
     const redirectUrl = new URL("/?sync=error", request.url);
     const message = error instanceof Error ? error.message : "Unknown sync error";

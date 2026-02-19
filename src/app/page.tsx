@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { createHash } from "node:crypto";
 import { redirect } from "next/navigation";
 import { hasValidSessionCookie } from "@/lib/auth";
 import { fetchJiraWorklogs, type WorklogEntry } from "@/lib/jira";
@@ -22,6 +23,7 @@ export default async function HomePage({ searchParams }: Props) {
     const params = searchParams ? await searchParams : {};
     const syncStatus = typeof params.sync === "string" ? params.sync : undefined;
     const syncMessage = typeof params.syncMessage === "string" ? params.syncMessage : undefined;
+    const syncAt = typeof params.syncAt === "string" ? params.syncAt : undefined;
     const dbEnabled = isSupabaseConfigured();
     let entries: WorklogEntry[] = [];
     let contributorTargets: Record<string, number> = {};
@@ -39,6 +41,10 @@ export default async function HomePage({ searchParams }: Props) {
     }
 
     const jiraBrowseUrl = (process.env.JIRA_BASE_URL ?? "").replace(/\/+$/, "");
+    const viewerStorageKey = createHash("sha256")
+      .update((process.env.JIRA_EMAIL ?? "unknown").toLowerCase())
+      .digest("hex")
+      .slice(0, 24);
 
     if (entries.length === 0) {
       return (
@@ -83,6 +89,8 @@ export default async function HomePage({ searchParams }: Props) {
           syncEnabled={dbEnabled}
           syncStatus={syncStatus}
           syncMessage={syncMessage}
+          syncAt={syncAt}
+          viewerStorageKey={viewerStorageKey}
         />
       </>
     );
