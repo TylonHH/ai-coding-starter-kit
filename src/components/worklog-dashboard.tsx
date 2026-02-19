@@ -33,6 +33,7 @@ type Props = {
   jiraBrowseUrl: string;
   syncEnabled: boolean;
   syncStatus?: string;
+  syncMessage?: string;
 };
 
 const PRESET_STORAGE_KEY = "jira-worklog-presets-v3";
@@ -152,22 +153,31 @@ function buildHeatmap(entries: WorklogEntry[]) {
   };
 }
 
-function polylinePath(values: number[], width: number, height: number, maxOverride?: number): string {
+function polylinePath(
+  values: number[],
+  maxOverride?: number,
+  left = 40,
+  right = 740,
+  top = 20,
+  bottom = 170
+): string {
   if (values.length === 0) {
     return "";
   }
 
   const max = maxOverride ?? Math.max(...values, 1);
+  const width = right - left;
+  const height = bottom - top;
   return values
     .map((value, index) => {
-      const x = (index / Math.max(values.length - 1, 1)) * width;
-      const y = height - (value / max) * height;
+      const x = left + (index / Math.max(values.length - 1, 1)) * width;
+      const y = bottom - (value / max) * height;
       return `${x},${y}`;
     })
     .join(" ");
 }
 
-export function WorklogDashboard({ entries, contributorTargets, jiraBrowseUrl, syncEnabled, syncStatus }: Props) {
+export function WorklogDashboard({ entries, contributorTargets, jiraBrowseUrl, syncEnabled, syncStatus, syncMessage }: Props) {
   const [datePreset, setDatePreset] = useState<DatePreset>("last30");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -441,9 +451,9 @@ export function WorklogDashboard({ entries, contributorTargets, jiraBrowseUrl, s
     () => Math.max(1, ...trend.map((t) => t.hours), metrics.dailyTargetHours),
     [metrics.dailyTargetHours, trend]
   );
-  const trendPath = useMemo(() => polylinePath(trend.map((t) => t.hours), 760, 160, trendMax), [trend, trendMax]);
+  const trendPath = useMemo(() => polylinePath(trend.map((t) => t.hours), trendMax), [trend, trendMax]);
   const trendTargetPath = useMemo(
-    () => polylinePath(trend.map(() => metrics.dailyTargetHours), 760, 160, trendMax),
+    () => polylinePath(trend.map(() => metrics.dailyTargetHours), trendMax),
     [metrics.dailyTargetHours, trend, trendMax]
   );
   const trendPoints = useMemo(
@@ -452,7 +462,7 @@ export function WorklogDashboard({ entries, contributorTargets, jiraBrowseUrl, s
         day: point.day,
         hours: point.hours,
         x: 40 + (index / Math.max(trend.length - 1, 1)) * 700,
-        y: 170 - (point.hours / trendMax) * 160 + 10,
+        y: 170 - (point.hours / trendMax) * 150,
       })),
     [trend, trendMax]
   );
@@ -531,7 +541,7 @@ export function WorklogDashboard({ entries, contributorTargets, jiraBrowseUrl, s
         </header>
 
         {syncStatus === "ok" && <div className="rounded border border-emerald-500/40 bg-emerald-100/80 px-4 py-2 text-sm text-emerald-900 dark:bg-emerald-900/20 dark:text-emerald-200">Jira sync completed successfully.</div>}
-        {syncStatus === "error" && <div className="rounded border border-rose-500/40 bg-rose-100/80 px-4 py-2 text-sm text-rose-900 dark:bg-rose-900/20 dark:text-rose-200">Jira sync failed. Check Jira credentials and permissions.</div>}
+        {syncStatus === "error" && <div className="rounded border border-rose-500/40 bg-rose-100/80 px-4 py-2 text-sm text-rose-900 dark:bg-rose-900/20 dark:text-rose-200">Jira sync failed. {syncMessage ? `${syncMessage}` : "Check Jira credentials, API permissions, and DB schema."}</div>}
 
         <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/30">
           <CardContent className="grid grid-cols-8 items-end gap-4 p-5">

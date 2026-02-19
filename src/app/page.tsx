@@ -21,6 +21,7 @@ export default async function HomePage({ searchParams }: Props) {
   try {
     const params = searchParams ? await searchParams : {};
     const syncStatus = typeof params.sync === "string" ? params.sync : undefined;
+    const syncMessage = typeof params.syncMessage === "string" ? params.syncMessage : undefined;
     const dbEnabled = isSupabaseConfigured();
     let entries: WorklogEntry[] = [];
     let contributorTargets: Record<string, number> = {};
@@ -81,6 +82,7 @@ export default async function HomePage({ searchParams }: Props) {
           jiraBrowseUrl={jiraBrowseUrl}
           syncEnabled={dbEnabled}
           syncStatus={syncStatus}
+          syncMessage={syncMessage}
         />
       </>
     );

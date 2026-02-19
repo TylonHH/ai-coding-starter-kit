@@ -92,6 +92,16 @@ type JiraIssueCommentsResponse = {
   total: number;
 };
 
+type JiraFieldDefinition = {
+  id: string;
+  name?: string;
+  schema?: {
+    custom?: string;
+    type?: string;
+    items?: string;
+  };
+};
+
 type JiraCurrentUserResponse = {
   accountId?: string;
   displayName?: string;
@@ -149,6 +159,15 @@ type SuggestionQuery = {
   accountId?: string;
   projectKey?: string;
   existingIssueKeys?: string[];
+};
+
+type AiSuggestionInput = {
+  issueKey: string;
+  issueSummary: string;
+  snippets: string[];
+  changedFields: string[];
+  commentCount: number;
+  historyCount: number;
 };
 
 function getRequiredEnv(name: string): string {
@@ -325,6 +344,30 @@ function getIssueTeamNames(issue: JiraIssue, teamFieldId: string): string[] {
   return [...new Set(extractTeamNames(teamValue))];
 }
 
+function scoreFieldAsTeam(field: JiraFieldDefinition): number {
+  const id = (field.id ?? "").toLowerCase();
+  const name = (field.name ?? "").toLowerCase();
+  const custom = (field.schema?.custom ?? "").toLowerCase();
+
+  let score = 0;
+  if (id.startsWith("customfield_")) {
+    score += 2;
+  }
+  if (name.includes("team")) {
+    score += 5;
+  }
+  if (name.includes("squad")) {
+    score += 3;
+  }
+  if (custom.includes("team")) {
+    score += 8;
+  }
+  if (custom.includes("atlassian")) {
+    score += 2;
+  }
+  return score;
+}
+
 function normalizePersonName(value: string): string {
   return value.trim().toLowerCase();
 }
@@ -399,7 +442,7 @@ function estimateSuggestionHours(
 function buildGermanSuggestionComment(input: {
   fieldKeys: string[];
   commentCount: number;
-}): { comment: string; changeSummary: string; changedFields: string[] } {
+}): { comment: string; changeSummary: string; changedFields: string[]; snippets: string[] } {
   const uniqueFields = [...new Set(input.fieldKeys)].filter(Boolean);
   const snippets = new Set<string>(["Umsetzung am Ticket"]);
   for (const field of uniqueFields) {
@@ -413,7 +456,64 @@ function buildGermanSuggestionComment(input: {
   const changeSummary = snippetList.join("; ");
   const comment = changeSummary;
   const changedFields = uniqueFields.map((field) => field || "ticket");
-  return { comment, changeSummary, changedFields };
+  return { comment, changeSummary, changedFields, snippets: snippetList };
+}
+
+async function maybeGenerateAiSuggestionLine(input: AiSuggestionInput): Promise<string | null> {
+  const apiKey = (process.env.OPENAI_API_KEY ?? "").trim();
+  if (!apiKey) {
+    return null;
+  }
+
+  const model = (process.env.OPENAI_MODEL ?? "gpt-4o-mini").trim();
+  const userPrompt = [
+    `Ticket: ${input.issueKey} - ${input.issueSummary}`,
+    `Änderungsfelder: ${input.changedFields.join(", ") || "keine"}`,
+    `Kommentaraktivität: ${input.commentCount}`,
+    `Änderungen gesamt: ${input.historyCount}`,
+    `Vorschlagsthemen: ${input.snippets.join("; ")}`,
+    "Erzeuge genau eine kurze deutsche Worklog-Zeile ohne Punkt am Ende.",
+    "Keine Aufzählung, kein Satz mit Nebensatz, nur eine prägnante Arbeitsaktivität.",
+  ].join("\n");
+
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        input: [
+          {
+            role: "system",
+            content:
+              "Du formulierst knappe deutsche Worklog-Notizen für Jira. Gib nur den finalen Einzeiler aus.",
+          },
+          {
+            role: "user",
+            content: userPrompt,
+          },
+        ],
+        temperature: 0.3,
+        max_output_tokens: 40,
+      }),
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+    const payload = (await response.json()) as { output_text?: string };
+    const text = (payload.output_text ?? "").trim().replace(/\s+/g, " ");
+    if (!text) {
+      return null;
+    }
+    return text.replace(/[.!?]+$/g, "").trim();
+  } catch {
+    return null;
+  }
 }
 
 function toJiraStarted(value: string): string {
@@ -462,14 +562,14 @@ async function getAllIssueWorklogs(cfg: JiraConfig, issue: JiraIssue): Promise<J
   return worklogs;
 }
 
-async function fetchIssues(cfg: JiraConfig): Promise<JiraIssue[]> {
+async function fetchIssues(cfg: JiraConfig, teamFieldId = ""): Promise<JiraIssue[]> {
   const allIssues: JiraIssue[] = [];
   let startAt = 0;
   const maxResults = 100;
 
   const fields = ["summary", "project", "worklog", "status"];
-  if (cfg.teamFieldId) {
-    fields.push(cfg.teamFieldId);
+  if (teamFieldId) {
+    fields.push(teamFieldId);
   }
 
   while (allIssues.length < cfg.maxIssues) {
@@ -490,9 +590,27 @@ async function fetchIssues(cfg: JiraConfig): Promise<JiraIssue[]> {
   return allIssues.slice(0, cfg.maxIssues);
 }
 
+async function resolveTeamFieldId(cfg: JiraConfig): Promise<string> {
+  if (cfg.teamFieldId) {
+    return cfg.teamFieldId;
+  }
+
+  try {
+    const fields = await jiraGet<JiraFieldDefinition[]>(cfg, "/rest/api/3/field", {});
+    const candidate = [...fields]
+      .map((field) => ({ field, score: scoreFieldAsTeam(field) }))
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => b.score - a.score)[0];
+    return candidate?.field.id ?? "";
+  } catch {
+    return "";
+  }
+}
+
 export async function fetchJiraWorklogs(): Promise<WorklogEntry[]> {
   const cfg = getConfig();
-  const issues = await fetchIssues(cfg);
+  const teamFieldId = await resolveTeamFieldId(cfg);
+  const issues = await fetchIssues(cfg, teamFieldId);
   const entries: WorklogEntry[] = [];
   const teamsByAccountId = new Map<string, string[]>();
 
@@ -527,7 +645,7 @@ export async function fetchJiraWorklogs(): Promise<WorklogEntry[]> {
   }
 
   for (const issue of issues) {
-    const issueTeamNames = getIssueTeamNames(issue, cfg.teamFieldId);
+    const issueTeamNames = getIssueTeamNames(issue, teamFieldId);
     const worklogs = await getAllIssueWorklogs(cfg, issue);
     for (const worklog of worklogs) {
       if (worklog.timeSpentSeconds > 0) {
@@ -545,7 +663,8 @@ export async function fetchJiraWorklogs(): Promise<WorklogEntry[]> {
 async function fetchIssuesUpdatedOnDay(
   cfg: JiraConfig,
   date: string,
-  projectKey?: string
+  projectKey?: string,
+  teamFieldId = ""
 ): Promise<JiraIssue[]> {
   const start = `${date} 00:00`;
   const nextDate = new Date(`${date}T00:00:00.000Z`);
@@ -559,8 +678,8 @@ async function fetchIssuesUpdatedOnDay(
   const maxResults = 50;
 
   const fields = ["summary", "project", "worklog", "status"];
-  if (cfg.teamFieldId) {
-    fields.push(cfg.teamFieldId);
+  if (teamFieldId) {
+    fields.push(teamFieldId);
   }
 
   while (startAt < 300) {
@@ -625,7 +744,8 @@ export async function generateWorklogSuggestions(query: SuggestionQuery): Promis
   const cfg = getConfig();
   const normalizedMember = normalizePersonName(query.memberName);
   const existingIssueKeys = new Set(query.existingIssueKeys ?? []);
-  const issues = await fetchIssuesUpdatedOnDay(cfg, query.date, query.projectKey);
+  const teamFieldId = await resolveTeamFieldId(cfg);
+  const issues = await fetchIssuesUpdatedOnDay(cfg, query.date, query.projectKey, teamFieldId);
   const suggestions: WorklogSuggestion[] = [];
 
   for (const issue of issues) {
@@ -694,10 +814,20 @@ export async function generateWorklogSuggestions(query: SuggestionQuery): Promis
       .sort();
     const normalizedStarted = startCandidates[0] ?? fallbackStarted;
     const summary = issue.fields.summary ?? "Ohne Titel";
-    const { comment, changeSummary, changedFields } = buildGermanSuggestionComment({
+    const { comment, changedFields, snippets } = buildGermanSuggestionComment({
       fieldKeys,
       commentCount: relevantComments.length,
     });
+    const aiComment =
+      (await maybeGenerateAiSuggestionLine({
+        issueKey: issue.key,
+        issueSummary: summary,
+        snippets,
+        changedFields,
+        commentCount: relevantComments.length,
+        historyCount: relevantHistories.length,
+      })) ?? "";
+    const finalComment = aiComment || comment;
     const aggregateId = relevantHistories[0]?.id ?? relevantComments[0]?.id ?? issue.id;
     suggestions.push({
       id: `${issue.key}:${aggregateId}`,
@@ -708,9 +838,9 @@ export async function generateWorklogSuggestions(query: SuggestionQuery): Promis
       projectName: issue.fields.project?.name ?? "Unknown project",
       started: normalizedStarted,
       seconds,
-      comment,
+      comment: finalComment,
       changedFields,
-      changeSummary,
+      changeSummary: finalComment,
     });
   }
 

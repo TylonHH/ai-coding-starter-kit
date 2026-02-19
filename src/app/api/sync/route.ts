@@ -18,7 +18,10 @@ export async function POST(request: Request) {
     const worklogs = await fetchJiraWorklogs();
     await upsertWorklogs(worklogs);
     return NextResponse.redirect(new URL("/?sync=ok", request.url));
-  } catch {
-    return NextResponse.redirect(new URL("/?sync=error", request.url));
+  } catch (error) {
+    const redirectUrl = new URL("/?sync=error", request.url);
+    const message = error instanceof Error ? error.message : "Unknown sync error";
+    redirectUrl.searchParams.set("syncMessage", message.slice(0, 220));
+    return NextResponse.redirect(redirectUrl);
   }
 }
