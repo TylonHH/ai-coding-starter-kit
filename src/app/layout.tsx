@@ -17,6 +17,12 @@ const fontMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "Jira Worklog Ops Dashboard",
   description: "Password-protected Jira worklog dashboard POC",
+  icons: {
+    icon: [
+      { url: "/favicon.svg", type: "image/svg+xml" },
+    ],
+    shortcut: ["/favicon.svg"],
+  },
 };
 
 export default function RootLayout({
