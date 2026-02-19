@@ -528,13 +528,11 @@ async function maybeGenerateAiSuggestionLine(input: AiSuggestionInput): Promise<
       })
       .join(" ")
       .trim();
-    const text = (payload.output_text ?? extractedFromOutput).trim().replace(/\s+/g, " ");
+    const text = (payload.output_text ?? extractedFromOutput).trim();
     if (!text) {
       return null;
     }
-    const shouldLowercase = /(alles\s+klein|nur\s+klein|kleinbuchstaben|lowercase)/i.test(systemPrompt);
-    const normalized = shouldLowercase ? text.toLocaleLowerCase("de-DE") : text;
-    return normalized.replace(/[.!?]+$/g, "").trim();
+    return text;
   } catch {
     return null;
   }
@@ -794,6 +792,8 @@ export async function generateWorklogSuggestions(query: SuggestionQuery): Promis
   const teamFieldId = await resolveTeamFieldId(cfg);
   const issues = await fetchIssuesUpdatedOnDay(cfg, query.date, query.projectKey, teamFieldId);
   const suggestions: WorklogSuggestion[] = [];
+  let aiCandidateCount = 0;
+  let aiNoOutputCount = 0;
 
   for (const issue of issues) {
     if (existingIssueKeys.has(issue.key)) {
@@ -865,19 +865,24 @@ export async function generateWorklogSuggestions(query: SuggestionQuery): Promis
       fieldKeys,
       commentCount: relevantComments.length,
     });
-    const aiComment =
-      query.mode === "ai"
-        ? (await maybeGenerateAiSuggestionLine({
-            issueKey: issue.key,
-            issueSummary: summary,
-            snippets,
-            changedFields,
-            commentCount: relevantComments.length,
-            historyCount: relevantHistories.length,
-            aiSystemPrompt: query.aiSystemPrompt,
-          })) ?? ""
-        : "";
-    const finalComment = aiComment || comment;
+    let finalComment = comment;
+    if (query.mode === "ai") {
+      aiCandidateCount += 1;
+      const aiComment = await maybeGenerateAiSuggestionLine({
+        issueKey: issue.key,
+        issueSummary: summary,
+        snippets,
+        changedFields,
+        commentCount: relevantComments.length,
+        historyCount: relevantHistories.length,
+        aiSystemPrompt: query.aiSystemPrompt,
+      });
+      if (!aiComment) {
+        aiNoOutputCount += 1;
+        continue;
+      }
+      finalComment = aiComment;
+    }
     const aggregateId = relevantHistories[0]?.id ?? relevantComments[0]?.id ?? issue.id;
     suggestions.push({
       id: `${issue.key}:${aggregateId}`,
@@ -892,6 +897,10 @@ export async function generateWorklogSuggestions(query: SuggestionQuery): Promis
       changedFields,
       changeSummary: finalComment,
     });
+  }
+
+  if (query.mode === "ai" && aiCandidateCount > 0 && suggestions.length === 0 && aiNoOutputCount > 0) {
+    throw new Error("AI returned no suggestion text. Please adjust your prompt or model settings.");
   }
 
   return suggestions.sort((a, b) => a.started.localeCompare(b.started));
