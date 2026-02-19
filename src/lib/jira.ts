@@ -73,6 +73,25 @@ type JiraChangelogItem = {
   toString?: string;
 };
 
+type JiraIssueComment = {
+  id: string;
+  created: string;
+  updated?: string;
+  body?: unknown;
+  author?: {
+    displayName?: string;
+    emailAddress?: string;
+    accountId?: string;
+  };
+};
+
+type JiraIssueCommentsResponse = {
+  comments: JiraIssueComment[];
+  maxResults: number;
+  startAt: number;
+  total: number;
+};
+
 export type WorklogEntry = {
   id: string;
   issueId: string;
@@ -273,47 +292,82 @@ function roundToQuarter(hours: number): number {
   return Math.max(0.25, Math.round(hours * 4) / 4);
 }
 
-function estimateSuggestionHours(items: JiraChangelogItem[]): number {
-  const fields = new Set(items.map((item) => (item.field ?? "").toLowerCase()));
-  let hours = 0.5 + items.length * 0.25;
-
-  if (fields.has("status") || fields.has("resolution")) {
-    hours += 0.5;
-  }
-  if (fields.has("description") || fields.has("summary")) {
-    hours += 0.25;
-  }
-  if (fields.has("assignee")) {
-    hours += 0.25;
-  }
-
-  return Math.min(3, roundToQuarter(hours));
+function toFieldKey(value?: string): string {
+  return (value ?? "").trim().toLowerCase();
 }
 
-function toGermanChangeLine(item: JiraChangelogItem): string {
-  const field = item.field?.trim() || "Feld";
-  const from = item.fromString?.trim();
-  const to = item.toString?.trim();
-  if (from && to) {
-    return `${field}: "${from}" -> "${to}"`;
+function toActivitySnippetFromField(field: string): string {
+  if (field.includes("status") || field.includes("resolution")) {
+    return "Status/Fortschritt aktualisiert";
   }
-  if (to) {
-    return `${field} auf "${to}" gesetzt`;
+  if (field.includes("assignee")) {
+    return "Zuweisung angepasst";
   }
-  return `${field} aktualisiert`;
+  if (field.includes("description")) {
+    return "Beschreibung überarbeitet";
+  }
+  if (field.includes("summary")) {
+    return "Titel präzisiert";
+  }
+  if (field.includes("link")) {
+    return "Verknüpfungen gepflegt";
+  }
+  if (field.includes("comment")) {
+    return "Kommentar ergänzt";
+  }
+  if (field.includes("label")) {
+    return "Labels aktualisiert";
+  }
+  if (field.includes("priority")) {
+    return "Priorität abgestimmt";
+  }
+  if (field.includes("component")) {
+    return "Komponenten angepasst";
+  }
+  if (field.includes("fix version") || field.includes("version")) {
+    return "Versionen gepflegt";
+  }
+  if (field.includes("sprint")) {
+    return "Sprintbezug aktualisiert";
+  }
+  return "Ticketinhalt bearbeitet";
 }
 
-function buildGermanSuggestionComment(
-  issueKey: string,
-  issueSummary: string,
-  items: JiraChangelogItem[]
-): { comment: string; changeSummary: string; changedFields: string[] } {
-  const lines = items.slice(0, 4).map(toGermanChangeLine);
-  const changedFields = items
-    .map((item) => item.field?.trim())
-    .filter((field): field is string => Boolean(field));
-  const changeSummary = lines.length > 0 ? lines.join("; ") : "Ticketinhalt aktualisiert";
-  const comment = `Bearbeitung von ${issueKey} (${issueSummary}). Änderungen: ${changeSummary}.`;
+function estimateSuggestionHours(
+  fieldKeys: string[],
+  historyCount: number,
+  commentCount: number
+): number {
+  const uniqueFields = new Set(fieldKeys);
+  let hours = 0.75;
+  hours += Math.min(1.75, historyCount * 0.35);
+  hours += Math.min(1.0, uniqueFields.size * 0.15);
+  hours += Math.min(1.0, commentCount * 0.25);
+
+  if (uniqueFields.has("status") || uniqueFields.has("resolution")) {
+    hours += 0.25;
+  }
+
+  return Math.min(6, roundToQuarter(hours));
+}
+
+function buildGermanSuggestionComment(input: {
+  fieldKeys: string[];
+  commentCount: number;
+}): { comment: string; changeSummary: string; changedFields: string[] } {
+  const uniqueFields = [...new Set(input.fieldKeys)].filter(Boolean);
+  const snippets = new Set<string>(["Umsetzung am Ticket"]);
+  for (const field of uniqueFields) {
+    snippets.add(toActivitySnippetFromField(field));
+  }
+  if (input.commentCount > 0) {
+    snippets.add("Kommentare dokumentiert");
+  }
+
+  const snippetList = [...snippets].slice(0, 4);
+  const changeSummary = snippetList.join("; ");
+  const comment = changeSummary;
+  const changedFields = uniqueFields.map((field) => field || "ticket");
   return { comment, changeSummary, changedFields };
 }
 
@@ -470,6 +524,46 @@ async function fetchIssuesUpdatedOnDay(
   return allIssues;
 }
 
+async function fetchIssueCommentsByMemberOnDate(
+  cfg: JiraConfig,
+  issueId: string,
+  date: string,
+  memberName: string,
+  accountId?: string
+): Promise<JiraIssueComment[]> {
+  const comments: JiraIssueComment[] = [];
+  let startAt = 0;
+  const maxResults = 100;
+  const normalizedMember = normalizePersonName(memberName);
+
+  while (startAt < 400) {
+    const response = await jiraGet<JiraIssueCommentsResponse>(
+      cfg,
+      `/rest/api/3/issue/${issueId}/comment`,
+      { startAt, maxResults }
+    );
+    comments.push(...response.comments);
+    startAt += response.maxResults;
+    if (startAt >= response.total || response.comments.length === 0) {
+      break;
+    }
+  }
+
+  return comments.filter((comment) => {
+    const dateToCheck = comment.updated ?? comment.created;
+    if (dayKey(dateToCheck) !== date) {
+      return false;
+    }
+    const commentAccountId = comment.author?.accountId ?? "";
+    const commentAuthorName = normalizePersonName(
+      comment.author?.displayName ?? comment.author?.emailAddress ?? ""
+    );
+    const matchesAccount = Boolean(accountId && commentAccountId && commentAccountId === accountId);
+    const matchesName = commentAuthorName.length > 0 && commentAuthorName === normalizedMember;
+    return matchesAccount || matchesName;
+  });
+}
+
 export async function generateWorklogSuggestions(query: SuggestionQuery): Promise<WorklogSuggestion[]> {
   const cfg = getConfig();
   const normalizedMember = normalizePersonName(query.memberName);
@@ -493,8 +587,14 @@ export async function generateWorklogSuggestions(query: SuggestionQuery): Promis
       const matchesName = historyName.length > 0 && historyName === normalizedMember;
       return matchesAccount || matchesName;
     });
-
-    if (relevantHistories.length === 0) {
+    const relevantComments = await fetchIssueCommentsByMemberOnDate(
+      cfg,
+      issue.id,
+      query.date,
+      query.memberName,
+      query.accountId
+    );
+    if (relevantHistories.length === 0 && relevantComments.length === 0) {
       continue;
     }
 
@@ -516,29 +616,45 @@ export async function generateWorklogSuggestions(query: SuggestionQuery): Promis
       continue;
     }
 
-    for (const history of relevantHistories) {
-      const items = history.items ?? [];
-      const hours = estimateSuggestionHours(items);
-      const seconds = Math.max(900, Math.round(hours * 3600));
-      const normalizedStarted = Number.isNaN(new Date(history.created).getTime())
-        ? new Date(`${query.date}T10:00:00.000Z`).toISOString()
-        : new Date(history.created).toISOString();
-      const summary = issue.fields.summary ?? "Ohne Titel";
-      const { comment, changeSummary, changedFields } = buildGermanSuggestionComment(issue.key, summary, items);
-      suggestions.push({
-        id: `${issue.key}:${history.id}`,
-        issueId: issue.id,
-        issueKey: issue.key,
-        issueSummary: summary,
-        projectKey: issue.fields.project?.key ?? "UNKNOWN",
-        projectName: issue.fields.project?.name ?? "Unknown project",
-        started: normalizedStarted,
-        seconds,
-        comment,
-        changedFields,
-        changeSummary,
-      });
+    const allItems = relevantHistories.flatMap((history) => history.items ?? []);
+    const fieldKeys = allItems.map((item) => toFieldKey(item.field)).filter(Boolean);
+    if (relevantComments.length > 0) {
+      fieldKeys.push("comment");
     }
+
+    const hours = estimateSuggestionHours(fieldKeys, relevantHistories.length, relevantComments.length);
+    const seconds = Math.max(900, Math.round(hours * 3600));
+    const fallbackStarted = new Date(`${query.date}T10:00:00.000Z`).toISOString();
+    const startCandidates = [
+      ...relevantHistories.map((history) => history.created),
+      ...relevantComments.map((comment) => comment.created),
+    ]
+      .map((value) => {
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+      })
+      .filter((value): value is string => Boolean(value))
+      .sort();
+    const normalizedStarted = startCandidates[0] ?? fallbackStarted;
+    const summary = issue.fields.summary ?? "Ohne Titel";
+    const { comment, changeSummary, changedFields } = buildGermanSuggestionComment({
+      fieldKeys,
+      commentCount: relevantComments.length,
+    });
+    const aggregateId = relevantHistories[0]?.id ?? relevantComments[0]?.id ?? issue.id;
+    suggestions.push({
+      id: `${issue.key}:${aggregateId}`,
+      issueId: issue.id,
+      issueKey: issue.key,
+      issueSummary: summary,
+      projectKey: issue.fields.project?.key ?? "UNKNOWN",
+      projectName: issue.fields.project?.name ?? "Unknown project",
+      started: normalizedStarted,
+      seconds,
+      comment,
+      changedFields,
+      changeSummary,
+    });
   }
 
   return suggestions.sort((a, b) => a.started.localeCompare(b.started));

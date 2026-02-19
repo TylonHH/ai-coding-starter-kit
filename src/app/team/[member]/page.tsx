@@ -182,6 +182,7 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
   const selectedDayTotalHours = selectedDayLogs.reduce((sum, item) => sum + item.seconds / 3600, 0);
   const selectedDayOverbooked = dailyTarget > 0 && selectedDayTotalHours > dailyTarget * 1.15;
   const selectedDayIssueKeys = [...new Set(selectedDayLogs.map((item) => item.issueKey))];
+  const todayKey = dayKey(new Date());
 
   const selectedIssueLogs = selectedIssue
     ? entries
@@ -344,6 +345,7 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
                   const ratio = dailyTarget > 0 ? Math.min(hours / dailyTarget, 1.5) : 0;
                   const isSelected = selectedDay === key;
                   const isOverbooked = dailyTarget > 0 && hours > dailyTarget * 1.15;
+                  const isToday = key === todayKey;
                   return (
                     <Link
                       key={key}
@@ -351,6 +353,8 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
                       className={`h-20 rounded border p-2 transition ${
                         isSelected
                           ? "border-cyan-500 bg-cyan-100/70 dark:border-cyan-400 dark:bg-cyan-900/20"
+                          : isToday
+                            ? "border-indigo-500 bg-indigo-100/70 dark:border-indigo-400 dark:bg-indigo-900/20"
                           : isOverbooked
                             ? "border-rose-400 bg-rose-100/70 dark:border-rose-500 dark:bg-rose-900/20"
                             : "border-slate-300 bg-slate-100/80 dark:border-slate-700 dark:bg-slate-900/50"
@@ -358,7 +362,7 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
                     >
                       <div className="flex items-center justify-between text-xs font-semibold">
                         <span>{cell.date.getDate()}</span>
-                        {isOverbooked ? <span className="text-rose-700 dark:text-rose-300">!</span> : null}
+                        {isOverbooked ? <span className="text-rose-700 dark:text-rose-300">!</span> : isToday ? <span className="text-indigo-700 dark:text-indigo-300">Today</span> : null}
                       </div>
                       <div className="mt-1 text-sm">{hourFormat(hours)}</div>
                       <div className="mt-1 h-1.5 overflow-hidden rounded bg-slate-300 dark:bg-slate-800">
