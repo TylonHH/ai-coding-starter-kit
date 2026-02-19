@@ -236,19 +236,21 @@ export function WorklogSuggestionPanel({
         {rows.map((row) => (
           <div key={row.id} className="rounded border border-slate-300 bg-slate-100/80 p-3 dark:border-slate-700 dark:bg-slate-900/50">
             <div className="mb-2 flex items-center justify-between text-sm">
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-emerald-700 dark:text-emerald-200">{row.issueKey}</span>
-                {jiraBrowseUrl && (
+              <div className="flex min-w-0 items-center gap-2">
+                {jiraBrowseUrl ? (
                   <a
                     href={`${jiraBrowseUrl}/browse/${row.issueKey}`}
                     target="_blank"
                     rel="noreferrer noopener"
-                    className="text-xs text-slate-600 hover:underline dark:text-slate-400"
+                    className="font-mono text-emerald-700 hover:underline dark:text-emerald-200"
                   >
-                    Jira
+                    {row.issueKey}
                   </a>
+                ) : (
+                  <span className="font-mono text-emerald-700 dark:text-emerald-200">{row.issueKey}</span>
                 )}
-                <span className="text-xs text-slate-600 dark:text-slate-400">{row.projectKey} - {row.projectName}</span>
+                <span className="truncate text-xs text-slate-800 dark:text-slate-200">{row.issueSummary}</span>
+                <span className="shrink-0 text-xs text-slate-600 dark:text-slate-400">{row.projectKey} - {row.projectName}</span>
               </div>
               <span className="text-xs text-slate-600 dark:text-slate-400">{row.changedFields.slice(0, 4).join(", ") || "Ticketänderung"}</span>
             </div>
