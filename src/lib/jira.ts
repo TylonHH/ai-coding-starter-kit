@@ -173,6 +173,10 @@ type AiSuggestionInput = {
   aiSystemPrompt?: string;
 };
 
+type AiSuggestionResult =
+  | { text: string; error: null }
+  | { text: null; error: string };
+
 function getRequiredEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
@@ -462,10 +466,10 @@ function buildGermanSuggestionComment(input: {
   return { comment, changeSummary, changedFields, snippets: snippetList };
 }
 
-async function maybeGenerateAiSuggestionLine(input: AiSuggestionInput): Promise<string | null> {
+async function maybeGenerateAiSuggestionLine(input: AiSuggestionInput): Promise<AiSuggestionResult> {
   const apiKey = (process.env.OPENAI_API_KEY ?? "").trim();
   if (!apiKey) {
-    return null;
+    return { text: null, error: "Missing OPENAI_API_KEY in server environment." };
   }
 
   const model = (process.env.OPENAI_MODEL ?? "gpt-4o-mini").trim();
@@ -507,11 +511,23 @@ async function maybeGenerateAiSuggestionLine(input: AiSuggestionInput): Promise<
     });
 
     if (!response.ok) {
-      return null;
+      const body = await response.text();
+      let message = body.slice(0, 320);
+      try {
+        const parsed = JSON.parse(body) as { error?: { message?: string } };
+        message = parsed.error?.message?.slice(0, 320) ?? message;
+      } catch {
+        // use raw fallback text
+      }
+      return {
+        text: null,
+        error: `OpenAI request failed (${response.status}): ${message}`,
+      };
     }
     const payload = (await response.json()) as {
       output_text?: string;
       output?: Array<{
+        type?: string;
         content?: Array<{
           type?: string;
           text?: string;
@@ -530,11 +546,22 @@ async function maybeGenerateAiSuggestionLine(input: AiSuggestionInput): Promise<
       .trim();
     const text = (payload.output_text ?? extractedFromOutput).trim();
     if (!text) {
-      return null;
+      const outputTypes = (payload.output ?? [])
+        .map((item) => item.type ?? "unknown")
+        .join(", ");
+      const contentTypes = (payload.output ?? [])
+        .flatMap((item) => item.content ?? [])
+        .map((part) => part.type ?? "unknown")
+        .join(", ");
+      return {
+        text: null,
+        error: `OpenAI returned empty text. output=[${outputTypes}] content=[${contentTypes}]`,
+      };
     }
-    return text;
-  } catch {
-    return null;
+    return { text, error: null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown OpenAI error";
+    return { text: null, error: message };
   }
 }
 
@@ -793,7 +820,7 @@ export async function generateWorklogSuggestions(query: SuggestionQuery): Promis
   const issues = await fetchIssuesUpdatedOnDay(cfg, query.date, query.projectKey, teamFieldId);
   const suggestions: WorklogSuggestion[] = [];
   let aiCandidateCount = 0;
-  let aiNoOutputCount = 0;
+  const aiErrorCounts = new Map<string, number>();
 
   for (const issue of issues) {
     if (existingIssueKeys.has(issue.key)) {
@@ -868,7 +895,7 @@ export async function generateWorklogSuggestions(query: SuggestionQuery): Promis
     let finalComment = comment;
     if (query.mode === "ai") {
       aiCandidateCount += 1;
-      const aiComment = await maybeGenerateAiSuggestionLine({
+      const aiResult = await maybeGenerateAiSuggestionLine({
         issueKey: issue.key,
         issueSummary: summary,
         snippets,
@@ -877,11 +904,12 @@ export async function generateWorklogSuggestions(query: SuggestionQuery): Promis
         historyCount: relevantHistories.length,
         aiSystemPrompt: query.aiSystemPrompt,
       });
-      if (!aiComment) {
-        aiNoOutputCount += 1;
+      if (!aiResult.text) {
+        const key = aiResult.error || "OpenAI returned no text";
+        aiErrorCounts.set(key, (aiErrorCounts.get(key) ?? 0) + 1);
         continue;
       }
-      finalComment = aiComment;
+      finalComment = aiResult.text;
     }
     const aggregateId = relevantHistories[0]?.id ?? relevantComments[0]?.id ?? issue.id;
     suggestions.push({
@@ -899,8 +927,17 @@ export async function generateWorklogSuggestions(query: SuggestionQuery): Promis
     });
   }
 
-  if (query.mode === "ai" && aiCandidateCount > 0 && suggestions.length === 0 && aiNoOutputCount > 0) {
-    throw new Error("AI returned no suggestion text. Please adjust your prompt or model settings.");
+  if (query.mode === "ai" && aiCandidateCount > 0 && suggestions.length === 0) {
+    const details = [...aiErrorCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([message, count]) => `${count}x ${message}`)
+      .join(" | ");
+    throw new Error(
+      details
+        ? `AI suggestion generation failed. ${details}`
+        : "AI suggestion generation failed. No AI output returned."
+    );
   }
 
   return suggestions.sort((a, b) => a.started.localeCompare(b.started));
