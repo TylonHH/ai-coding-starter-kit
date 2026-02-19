@@ -158,7 +158,7 @@ async function fetchIssues(cfg: JiraConfig): Promise<JiraIssue[]> {
   const maxResults = 100;
 
   while (allIssues.length < cfg.maxIssues) {
-    const response = await jiraGet<JiraIssueSearchResponse>(cfg, "/rest/api/3/search", {
+    const response = await jiraGet<JiraIssueSearchResponse>(cfg, "/rest/api/3/search/jql", {
       jql: cfg.jql,
       fields: "summary,project,worklog,status",
       maxResults,
