@@ -48,9 +48,14 @@ export async function upsertWorklogs(entries: WorklogEntry[]): Promise<void> {
 
   const supabase = getSupabaseAdmin();
   const chunkSize = 500;
+  const uniqueById = new Map<string, WorklogEntry>();
+  for (const entry of entries) {
+    uniqueById.set(entry.id, entry);
+  }
+  const dedupedEntries = [...uniqueById.values()];
 
-  for (let index = 0; index < entries.length; index += chunkSize) {
-    const chunk = entries.slice(index, index + chunkSize).map(toRow);
+  for (let index = 0; index < dedupedEntries.length; index += chunkSize) {
+    const chunk = dedupedEntries.slice(index, index + chunkSize).map(toRow);
     const { error } = await supabase.from("jira_worklogs").upsert(chunk, {
       onConflict: "id",
       ignoreDuplicates: false,

@@ -115,7 +115,8 @@ async function jiraGet<T>(
 
 function normalizeWorklog(issue: JiraIssue, worklog: JiraWorklog): WorklogEntry {
   return {
-    id: worklog.id,
+    // Worklog IDs can collide across issues in some Jira setups, so keep IDs globally unique.
+    id: `${issue.id}:${worklog.id}`,
     issueId: issue.id,
     issueKey: issue.key,
     issueSummary: issue.fields.summary,
