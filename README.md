@@ -17,6 +17,7 @@ This fork now includes a password-protected, desktop-focused Jira Worklog dashbo
    - `JIRA_BASE_URL`
    - `JIRA_EMAIL`
    - `JIRA_API_TOKEN`
+   - optional: `JIRA_TEAM_GROUP_PREFIX` (filters Jira groups used as teams)
    - `SUPABASE_URL`
    - `SUPABASE_SERVICE_ROLE_KEY`
 3. In Supabase SQL Editor, run:
@@ -43,6 +44,7 @@ Then open `http://localhost:3000/login`, enter the app password, and access the 
 - First run auto-seeds DB from Jira if table is empty.
 - Manual sync is available via `Sync Jira Now` button (calls `/api/sync`).
 - If Supabase env vars are missing, app falls back to direct Jira API reads.
+- Contributor targets are stored in `jira_contributor_targets`.
 
 ### Public Fork Safety
 

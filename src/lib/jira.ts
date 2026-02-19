@@ -39,9 +39,11 @@ type JiraWorklog = {
   id: string;
   timeSpentSeconds: number;
   started: string;
+  comment?: unknown;
   author?: {
     displayName?: string;
     emailAddress?: string;
+    accountId?: string;
   };
 };
 
@@ -53,8 +55,11 @@ export type WorklogEntry = {
   projectKey: string;
   projectName: string;
   author: string;
+  authorAccountId: string;
+  teamNames: string[];
   started: string;
   seconds: number;
+  comment: string;
 };
 
 type JiraConfig = {
@@ -63,6 +68,7 @@ type JiraConfig = {
   apiToken: string;
   jql: string;
   maxIssues: number;
+  teamGroupPrefix: string;
 };
 
 function getRequiredEnv(name: string): string {
@@ -80,11 +86,43 @@ function getConfig(): JiraConfig {
     apiToken: getRequiredEnv("JIRA_API_TOKEN"),
     jql: process.env.JIRA_JQL ?? "worklogDate >= startOfMonth(-2)",
     maxIssues: Number.parseInt(process.env.JIRA_MAX_ISSUES ?? "100", 10),
+    teamGroupPrefix: (process.env.JIRA_TEAM_GROUP_PREFIX ?? "").trim().toLowerCase(),
   };
 }
 
 function authHeader(email: string, token: string): string {
   return `Basic ${Buffer.from(`${email}:${token}`).toString("base64")}`;
+}
+
+type JiraGroupLike = {
+  name?: string;
+};
+
+type JiraUserGroupsResponse = JiraGroupLike[] | { values?: JiraGroupLike[] };
+
+function extractAdfText(node: unknown): string {
+  if (!node || typeof node !== "object") {
+    return "";
+  }
+  const typed = node as { type?: string; text?: string; content?: unknown[] };
+  if (typed.type === "text" && typeof typed.text === "string") {
+    return typed.text;
+  }
+  if (Array.isArray(typed.content)) {
+    return typed.content.map(extractAdfText).join(" ").trim();
+  }
+  return "";
+}
+
+function normalizeWorklogComment(comment: unknown): string {
+  if (!comment) {
+    return "";
+  }
+  if (typeof comment === "string") {
+    return comment;
+  }
+  const extracted = extractAdfText(comment).replace(/\s+/g, " ").trim();
+  return extracted;
 }
 
 async function jiraGet<T>(
@@ -113,7 +151,7 @@ async function jiraGet<T>(
   return (await response.json()) as T;
 }
 
-function normalizeWorklog(issue: JiraIssue, worklog: JiraWorklog): WorklogEntry {
+function normalizeWorklog(issue: JiraIssue, worklog: JiraWorklog, teamNames: string[]): WorklogEntry {
   return {
     // Worklog IDs can collide across issues in some Jira setups, so keep IDs globally unique.
     id: `${issue.id}:${worklog.id}`,
@@ -123,8 +161,11 @@ function normalizeWorklog(issue: JiraIssue, worklog: JiraWorklog): WorklogEntry 
     projectKey: issue.fields.project?.key ?? "UNKNOWN",
     projectName: issue.fields.project?.name ?? "Unknown project",
     author: worklog.author?.displayName ?? worklog.author?.emailAddress ?? "Unknown user",
+    authorAccountId: worklog.author?.accountId ?? "unknown-account",
+    teamNames,
     started: worklog.started,
     seconds: worklog.timeSpentSeconds,
+    comment: normalizeWorklogComment(worklog.comment),
   };
 }
 
@@ -180,12 +221,45 @@ export async function fetchJiraWorklogs(): Promise<WorklogEntry[]> {
   const cfg = getConfig();
   const issues = await fetchIssues(cfg);
   const entries: WorklogEntry[] = [];
+  const teamsByAccountId = new Map<string, string[]>();
+
+  async function getTeamsForAccount(accountId: string): Promise<string[]> {
+    if (!accountId) {
+      return [];
+    }
+    const cached = teamsByAccountId.get(accountId);
+    if (cached) {
+      return cached;
+    }
+
+    try {
+      const groupsResponse = await jiraGet<JiraUserGroupsResponse>(cfg, "/rest/api/3/user/groups", {
+        accountId,
+      });
+      const groups = Array.isArray(groupsResponse) ? groupsResponse : groupsResponse.values ?? [];
+      const groupNames = groups
+        .map((group) => group.name?.trim())
+        .filter((name): name is string => Boolean(name))
+        .filter((name) =>
+          cfg.teamGroupPrefix ? name.toLowerCase().includes(cfg.teamGroupPrefix) : true
+        );
+
+      const unique = [...new Set(groupNames)];
+      teamsByAccountId.set(accountId, unique);
+      return unique;
+    } catch {
+      teamsByAccountId.set(accountId, []);
+      return [];
+    }
+  }
 
   for (const issue of issues) {
     const worklogs = await getAllIssueWorklogs(cfg, issue);
     for (const worklog of worklogs) {
       if (worklog.timeSpentSeconds > 0) {
-        entries.push(normalizeWorklog(issue, worklog));
+        const accountId = worklog.author?.accountId ?? "";
+        const teamNames = await getTeamsForAccount(accountId);
+        entries.push(normalizeWorklog(issue, worklog, teamNames));
       }
     }
   }
