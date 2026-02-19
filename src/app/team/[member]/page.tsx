@@ -5,6 +5,7 @@ import { hasValidSessionCookie } from "@/lib/auth";
 import { fetchJiraWorklogs } from "@/lib/jira";
 import { isSupabaseConfigured } from "@/lib/supabase-admin";
 import { readAllWorklogs } from "@/lib/worklog-store";
+import { ModeToggle } from "@/components/mode-toggle";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -53,12 +54,13 @@ export default async function TeamMemberPage({ params }: Props) {
     .slice(0, 20);
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#134e4a_0%,_#0f172a_42%,_#020617_100%)] p-8 text-slate-100">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#dcfce7_0%,_#f8fafc_40%,_#e2e8f0_100%)] p-8 text-slate-900 dark:bg-[radial-gradient(circle_at_top,_#134e4a_0%,_#0f172a_42%,_#020617_100%)] dark:text-slate-100">
       <div className="mx-auto flex max-w-[1200px] flex-col gap-5">
-        <header className="rounded-2xl border border-slate-700/50 bg-slate-950/50 p-6">
-          <p className="font-mono text-xs uppercase tracking-[0.3em] text-emerald-300">Team Drilldown</p>
+        <header className="rounded-2xl border border-slate-300/80 bg-white/85 p-6 dark:border-slate-700/50 dark:bg-slate-950/50">
+          <p className="font-mono text-xs uppercase tracking-[0.3em] text-emerald-700 dark:text-emerald-300">Team Drilldown</p>
           <h1 className="mt-2 text-4xl font-semibold">{member}</h1>
           <div className="mt-4 flex gap-3">
+            <ModeToggle />
             <Button asChild variant="secondary">
               <Link href="/">
                 <ArrowLeft className="mr-2 h-4 w-4" />
@@ -72,51 +74,51 @@ export default async function TeamMemberPage({ params }: Props) {
         </header>
 
         <section className="grid grid-cols-3 gap-4">
-          <Card className="border-slate-700/50 bg-slate-950/40">
+          <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40">
             <CardHeader className="pb-1">
-              <CardTitle className="flex items-center gap-2 text-sm text-slate-300">
+              <CardTitle className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
                 <Timer className="h-4 w-4 text-emerald-300" />
                 Total Hours
               </CardTitle>
             </CardHeader>
             <CardContent className="text-3xl font-semibold">{hourFormat(totalHours)}</CardContent>
           </Card>
-          <Card className="border-slate-700/50 bg-slate-950/40">
+          <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40">
             <CardHeader className="pb-1">
-              <CardTitle className="text-sm text-slate-300">Active Days</CardTitle>
+              <CardTitle className="text-sm text-slate-700 dark:text-slate-300">Active Days</CardTitle>
             </CardHeader>
             <CardContent className="text-3xl font-semibold">{activeDays}</CardContent>
           </Card>
-          <Card className="border-slate-700/50 bg-slate-950/40">
+          <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40">
             <CardHeader className="pb-1">
-              <CardTitle className="text-sm text-slate-300">Projects Involved</CardTitle>
+              <CardTitle className="text-sm text-slate-700 dark:text-slate-300">Projects Involved</CardTitle>
             </CardHeader>
             <CardContent className="text-3xl font-semibold">{projects.length}</CardContent>
           </Card>
         </section>
 
         <section className="grid grid-cols-3 gap-4">
-          <Card className="col-span-1 border-slate-700/50 bg-slate-950/40">
+          <Card className="col-span-1 border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40">
             <CardHeader>
               <CardTitle>Projects</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
               {projects.map((project) => (
-                <div key={project} className="rounded border border-slate-700/60 bg-slate-900/50 px-3 py-2 text-sm">
+                <div key={project} className="rounded border border-slate-300 bg-slate-100/80 px-3 py-2 text-sm dark:border-slate-700/60 dark:bg-slate-900/50">
                   {project}
                 </div>
               ))}
             </CardContent>
           </Card>
 
-          <Card className="col-span-2 border-slate-700/50 bg-slate-950/40">
+          <Card className="col-span-2 border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40">
             <CardHeader>
               <CardTitle>Top Issues</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="overflow-hidden rounded border border-slate-700/40">
                 <table className="w-full text-left text-sm">
-                  <thead className="bg-slate-900/80 text-xs uppercase tracking-widest text-slate-400">
+                  <thead className="bg-slate-200/90 text-xs uppercase tracking-widest text-slate-600 dark:bg-slate-900/80 dark:text-slate-400">
                     <tr>
                       <th className="px-3 py-2">Issue</th>
                       <th className="px-3 py-2">Project</th>
@@ -126,14 +128,14 @@ export default async function TeamMemberPage({ params }: Props) {
                   </thead>
                   <tbody>
                     {topIssues.map((item) => (
-                      <tr key={item.key} className="border-t border-slate-800/80">
-                        <td className="px-3 py-2 font-mono text-xs text-emerald-200">
+                      <tr key={item.key} className="border-t border-slate-300 dark:border-slate-800/80">
+                        <td className="px-3 py-2 font-mono text-xs text-emerald-700 dark:text-emerald-200">
                           {jiraBrowseUrl ? (
                             <a
                               href={`${jiraBrowseUrl}/browse/${item.key}`}
                               target="_blank"
                               rel="noreferrer noopener"
-                              className="inline-flex items-center gap-1 hover:text-emerald-100 hover:underline"
+                              className="inline-flex items-center gap-1 hover:text-emerald-900 hover:underline dark:hover:text-emerald-100"
                             >
                               {item.key}
                               <Link2 className="h-3 w-3" />
@@ -142,9 +144,9 @@ export default async function TeamMemberPage({ params }: Props) {
                             item.key
                           )}
                         </td>
-                        <td className="px-3 py-2 text-slate-200">{item.project}</td>
-                        <td className="px-3 py-2 text-slate-200">{hourFormat(item.hours)}</td>
-                        <td className="truncate px-3 py-2 text-slate-300">{item.summary}</td>
+                        <td className="px-3 py-2 text-slate-800 dark:text-slate-200">{item.project}</td>
+                        <td className="px-3 py-2 text-slate-800 dark:text-slate-200">{hourFormat(item.hours)}</td>
+                        <td className="truncate px-3 py-2 text-slate-700 dark:text-slate-300">{item.summary}</td>
                       </tr>
                     ))}
                   </tbody>

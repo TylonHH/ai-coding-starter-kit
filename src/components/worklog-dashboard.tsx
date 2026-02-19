@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ModeToggle } from "@/components/mode-toggle";
 
 type DatePreset = "30d" | "90d" | "ytd" | "all";
 type SummaryMode = "executive" | "delivery" | "team";
@@ -280,29 +281,36 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
   const strongestAuthor = topAuthors[0]?.name ?? "n/a";
 
   return (
-    <div className="hidden min-h-screen bg-[radial-gradient(circle_at_top_right,_#2a3f57_0%,_#111827_45%,_#05070b_100%)] p-8 text-slate-100 lg:block">
+    <div className="hidden min-h-screen bg-[radial-gradient(circle_at_top_right,_#f8fafc_0%,_#e2e8f0_48%,_#cbd5e1_100%)] p-8 text-slate-900 dark:bg-[radial-gradient(circle_at_top_right,_#2a3f57_0%,_#111827_45%,_#05070b_100%)] dark:text-slate-100 lg:block">
       <div className="mx-auto flex max-w-[1440px] flex-col gap-6">
-        <header className="grid grid-cols-[1fr_auto] items-center gap-4 rounded-2xl border border-slate-700/50 bg-slate-950/40 p-6 shadow-2xl backdrop-blur">
+        <header className="grid grid-cols-[1fr_auto] items-center gap-4 rounded-2xl border border-slate-300/80 bg-white/85 p-6 dark:border-slate-700/50 dark:bg-slate-950/40 shadow-2xl backdrop-blur">
           <div>
             <p className="font-mono text-xs uppercase tracking-[0.32em] text-amber-300">
               Jira Worklog Command Deck
             </p>
             <h1 className="mt-2 text-4xl font-semibold tracking-tight">Operations Intelligence Dashboard</h1>
-            <p className="mt-2 max-w-2xl text-sm text-slate-300">
+            <p className="mt-2 max-w-2xl text-sm text-slate-700 dark:text-slate-300">
               Explore logged effort by timeline, project, contributor, and ticket. Use filters to generate quick
               executive, delivery, or team-focused summaries.
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <ModeToggle />
             {syncEnabled && (
               <form action="/api/sync" method="post">
-                <Button variant="outline" className="border border-emerald-500/60 text-emerald-200 hover:bg-emerald-900/20">
+                <Button
+                  variant="outline"
+                  className="border border-emerald-500/60 text-emerald-800 hover:bg-emerald-100 dark:text-emerald-200 dark:hover:bg-emerald-900/20"
+                >
                   Sync Jira Now
                 </Button>
               </form>
             )}
             <form action="/api/auth/logout" method="post">
-              <Button variant="secondary" className="border border-slate-600 bg-slate-900/50 hover:bg-slate-800">
+              <Button
+                variant="secondary"
+                className="border border-slate-400 bg-slate-100/80 text-slate-900 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-900/50 dark:text-slate-100 dark:hover:bg-slate-800"
+              >
                 Sign out
               </Button>
             </form>
@@ -310,31 +318,31 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
         </header>
 
         {syncStatus === "ok" && (
-          <div className="rounded border border-emerald-500/40 bg-emerald-900/20 px-4 py-2 text-sm text-emerald-200">
+          <div className="rounded border border-emerald-500/40 bg-emerald-100/80 px-4 py-2 text-sm text-emerald-900 dark:bg-emerald-900/20 dark:text-emerald-200">
             Jira sync completed successfully.
           </div>
         )}
         {syncStatus === "error" && (
-          <div className="rounded border border-rose-500/40 bg-rose-900/20 px-4 py-2 text-sm text-rose-200">
+          <div className="rounded border border-rose-500/40 bg-rose-100/80 px-4 py-2 text-sm text-rose-900 dark:bg-rose-900/20 dark:text-rose-200">
             Jira sync failed. Check Jira credentials and permissions.
           </div>
         )}
         {syncStatus === "disabled" && (
-          <div className="rounded border border-amber-500/40 bg-amber-900/20 px-4 py-2 text-sm text-amber-200">
+          <div className="rounded border border-amber-500/40 bg-amber-900/20 px-4 py-2 text-sm text-amber-700 dark:text-amber-200">
             Sync endpoint is disabled because Supabase is not configured.
           </div>
         )}
 
-        <Card className="border-slate-700/50 bg-slate-950/30">
+        <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/30">
           <CardContent className="grid grid-cols-6 items-end gap-4 p-5">
             <div className="col-span-1">
-              <p className="mb-2 text-xs uppercase tracking-widest text-slate-400">Range</p>
+              <p className="mb-2 text-xs uppercase tracking-widest text-slate-600 dark:text-slate-400">Range</p>
               <Tabs
                 value={datePreset}
                 onValueChange={(value) => setDatePreset(value as DatePreset)}
                 className="w-full"
               >
-                <TabsList className="grid h-10 w-full grid-cols-4 bg-slate-900">
+                <TabsList className="grid h-10 w-full grid-cols-4 bg-slate-200 dark:bg-slate-900">
                   <TabsTrigger value="30d">30d</TabsTrigger>
                   <TabsTrigger value="90d">90d</TabsTrigger>
                   <TabsTrigger value="ytd">YTD</TabsTrigger>
@@ -343,7 +351,7 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
               </Tabs>
             </div>
             <div className="col-span-1">
-              <p className="mb-2 text-xs uppercase tracking-widest text-slate-400">Project</p>
+              <p className="mb-2 text-xs uppercase tracking-widest text-slate-600 dark:text-slate-400">Project</p>
               <Select value={project} onValueChange={setProject}>
                 <SelectTrigger>
                   <SelectValue />
@@ -358,7 +366,7 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
               </Select>
             </div>
             <div className="col-span-1">
-              <p className="mb-2 text-xs uppercase tracking-widest text-slate-400">Contributor</p>
+              <p className="mb-2 text-xs uppercase tracking-widest text-slate-600 dark:text-slate-400">Contributor</p>
               <Select value={author} onValueChange={setAuthor}>
                 <SelectTrigger>
                   <SelectValue />
@@ -373,7 +381,7 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
               </Select>
             </div>
             <div className="col-span-2">
-              <p className="mb-2 text-xs uppercase tracking-widest text-slate-400">Ticket search</p>
+              <p className="mb-2 text-xs uppercase tracking-widest text-slate-600 dark:text-slate-400">Ticket search</p>
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
@@ -381,7 +389,7 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
               />
             </div>
             <div className="col-span-1">
-              <p className="mb-2 text-xs uppercase tracking-widest text-slate-400">Summary mode</p>
+              <p className="mb-2 text-xs uppercase tracking-widest text-slate-600 dark:text-slate-400">Summary mode</p>
               <Select value={summaryMode} onValueChange={(value) => setSummaryMode(value as SummaryMode)}>
                 <SelectTrigger>
                   <SelectValue />
@@ -396,10 +404,10 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
           </CardContent>
         </Card>
 
-        <Card className="border-slate-700/50 bg-slate-950/30">
+        <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/30">
           <CardContent className="grid grid-cols-7 items-end gap-4 p-5">
             <div className="col-span-2">
-              <p className="mb-2 text-xs uppercase tracking-widest text-slate-400">Preset name</p>
+              <p className="mb-2 text-xs uppercase tracking-widest text-slate-600 dark:text-slate-400">Preset name</p>
               <Input
                 value={presetName}
                 onChange={(event) => setPresetName(event.target.value)}
@@ -417,7 +425,7 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
               </Button>
             </div>
             <div className="col-span-2">
-              <p className="mb-2 text-xs uppercase tracking-widest text-slate-400">Saved presets</p>
+              <p className="mb-2 text-xs uppercase tracking-widest text-slate-600 dark:text-slate-400">Saved presets</p>
               <Select value={selectedPreset} onValueChange={applyPreset}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select preset..." />
@@ -438,43 +446,43 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
                 Delete
               </Button>
             </div>
-            <div className="col-span-1 text-right text-xs text-slate-400">
+            <div className="col-span-1 text-right text-xs text-slate-600 dark:text-slate-400">
               Presets are stored in local browser storage.
             </div>
           </CardContent>
         </Card>
 
         <section className="grid grid-cols-4 gap-4">
-          <Card className="border-slate-700/50 bg-slate-950/40">
+          <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40">
             <CardHeader className="pb-1">
-              <CardTitle className="flex items-center gap-2 text-sm text-slate-300">
+              <CardTitle className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
                 <Timer className="h-4 w-4 text-amber-300" />
                 Total Hours
               </CardTitle>
             </CardHeader>
             <CardContent className="text-3xl font-semibold">{hourFormat(metrics.totalHours)}</CardContent>
           </Card>
-          <Card className="border-slate-700/50 bg-slate-950/40">
+          <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40">
             <CardHeader className="pb-1">
-              <CardTitle className="flex items-center gap-2 text-sm text-slate-300">
+              <CardTitle className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
                 <CalendarDays className="h-4 w-4 text-cyan-300" />
                 Active Days
               </CardTitle>
             </CardHeader>
             <CardContent className="text-3xl font-semibold">{metrics.activeDays}</CardContent>
           </Card>
-          <Card className="border-slate-700/50 bg-slate-950/40">
+          <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40">
             <CardHeader className="pb-1">
-              <CardTitle className="flex items-center gap-2 text-sm text-slate-300">
+              <CardTitle className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
                 <ListChecks className="h-4 w-4 text-emerald-300" />
                 Tickets Touched
               </CardTitle>
             </CardHeader>
             <CardContent className="text-3xl font-semibold">{metrics.issueCount}</CardContent>
           </Card>
-          <Card className="border-slate-700/50 bg-slate-950/40">
+          <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40">
             <CardHeader className="pb-1">
-              <CardTitle className="flex items-center gap-2 text-sm text-slate-300">
+              <CardTitle className="flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
                 <BarChart3 className="h-4 w-4 text-fuchsia-300" />
                 Avg / Active Day
               </CardTitle>
@@ -484,12 +492,12 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
         </section>
 
         <section className="grid grid-cols-3 gap-4">
-          <Card className="col-span-2 border-slate-700/50 bg-slate-950/40">
+          <Card className="col-span-2 border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40">
             <CardHeader>
               <CardTitle>Worklog Timeline</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="rounded-xl border border-slate-700/40 bg-slate-900/40 p-4">
+              <div className="rounded-xl border border-slate-700/40 bg-slate-100/90 dark:bg-slate-900/40 p-4">
                 <svg viewBox="0 0 760 190" className="w-full">
                   <defs>
                     <linearGradient id="trendLine" x1="0" y1="0" x2="0" y2="1">
@@ -507,17 +515,17 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
                   />
                 </svg>
               </div>
-              <p className="mt-3 text-xs text-slate-400">
+              <p className="mt-3 text-xs text-slate-600 dark:text-slate-400">
                 Showing {trend.length} tracked day(s). Peak project: <strong>{strongestProject}</strong>.
               </p>
             </CardContent>
           </Card>
 
-          <Card className="border-slate-700/50 bg-slate-950/40">
+          <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40">
             <CardHeader>
               <CardTitle>Smart Summary</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3 text-sm text-slate-200">
+            <CardContent className="space-y-3 text-sm text-slate-800 dark:text-slate-200">
               {summaryMode === "executive" && (
                 <>
                   <p>
@@ -559,7 +567,7 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
         </section>
 
         <section className="grid grid-cols-2 gap-4">
-          <Card className="border-slate-700/50 bg-slate-950/40">
+          <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Filter className="h-4 w-4 text-amber-300" />
@@ -571,11 +579,11 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
                 const width = (item.hours / Math.max(topProjects[0]?.hours ?? 1, 1)) * 100;
                 return (
                   <div key={item.name}>
-                    <div className="mb-1 flex justify-between text-xs text-slate-300">
+                    <div className="mb-1 flex justify-between text-xs text-slate-700 dark:text-slate-300">
                       <span>{item.name}</span>
                       <span>{hourFormat(item.hours)}</span>
                     </div>
-                    <div className="h-2 overflow-hidden rounded bg-slate-800">
+                    <div className="h-2 overflow-hidden rounded bg-slate-300 dark:bg-slate-800">
                       <div
                         className="h-full bg-gradient-to-r from-amber-300 via-orange-300 to-pink-300"
                         style={{ width: `${width}%` }}
@@ -587,7 +595,7 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
             </CardContent>
           </Card>
 
-          <Card className="border-slate-700/50 bg-slate-950/40">
+          <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Users className="h-4 w-4 text-cyan-300" />
@@ -599,16 +607,16 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
                 const width = (item.hours / Math.max(topAuthors[0]?.hours ?? 1, 1)) * 100;
                 return (
                   <div key={item.name}>
-                    <div className="mb-1 flex justify-between text-xs text-slate-300">
+                    <div className="mb-1 flex justify-between text-xs text-slate-700 dark:text-slate-300">
                       <Link
                         href={`/team/${encodeURIComponent(item.name)}`}
-                        className="hover:text-cyan-200 hover:underline"
+                        className="hover:text-cyan-700 dark:text-cyan-200 hover:underline"
                       >
                         #{index + 1} {item.name}
                       </Link>
                       <span>{hourFormat(item.hours)}</span>
                     </div>
-                    <div className="h-2 overflow-hidden rounded bg-slate-800">
+                    <div className="h-2 overflow-hidden rounded bg-slate-300 dark:bg-slate-800">
                       <div
                         className="h-full bg-gradient-to-r from-cyan-300 via-sky-300 to-indigo-300"
                         style={{ width: `${width}%` }}
@@ -622,14 +630,14 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
         </section>
 
         <section className="grid grid-cols-3 gap-4">
-          <Card className="col-span-2 border-slate-700/50 bg-slate-950/40">
+          <Card className="col-span-2 border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40">
             <CardHeader>
               <CardTitle>High-Effort Issues</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="overflow-hidden rounded border border-slate-700/40">
                 <table className="w-full text-left text-sm">
-                  <thead className="bg-slate-900/80 text-xs uppercase tracking-widest text-slate-400">
+                  <thead className="bg-slate-200/90 dark:bg-slate-900/80 text-xs uppercase tracking-widest text-slate-600 dark:text-slate-400">
                     <tr>
                       <th className="px-3 py-2">Issue</th>
                       <th className="px-3 py-2">Project</th>
@@ -640,10 +648,10 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
                   <tbody>
                     {topIssues.map((item) => (
                       <tr key={item.key} className="border-t border-slate-800/80">
-                        <td className="px-3 py-2 font-mono text-xs text-amber-200">
+                        <td className="px-3 py-2 font-mono text-xs text-amber-700 dark:text-amber-200">
                           {jiraBrowseUrl ? (
                             <a
-                              className="inline-flex items-center gap-1 hover:text-amber-100 hover:underline"
+                              className="inline-flex items-center gap-1 hover:text-amber-900 dark:hover:text-amber-100 hover:underline"
                               href={`${jiraBrowseUrl}/browse/${item.key}`}
                               target="_blank"
                               rel="noreferrer noopener"
@@ -655,9 +663,9 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
                             item.key
                           )}
                         </td>
-                        <td className="px-3 py-2 text-slate-200">{item.project}</td>
-                        <td className="px-3 py-2 text-slate-200">{hourFormat(item.hours)}</td>
-                        <td className="truncate px-3 py-2 text-slate-300">{item.summary}</td>
+                        <td className="px-3 py-2 text-slate-800 dark:text-slate-200">{item.project}</td>
+                        <td className="px-3 py-2 text-slate-800 dark:text-slate-200">{hourFormat(item.hours)}</td>
+                        <td className="truncate px-3 py-2 text-slate-700 dark:text-slate-300">{item.summary}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -666,13 +674,13 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
             </CardContent>
           </Card>
 
-          <Card className="border-slate-700/50 bg-slate-950/40">
+          <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40">
             <CardHeader>
               <CardTitle>Weekday Heatmap</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                <div className="grid grid-cols-7 gap-1 text-center text-[10px] uppercase tracking-wider text-slate-400">
+                <div className="grid grid-cols-7 gap-1 text-center text-[10px] uppercase tracking-wider text-slate-600 dark:text-slate-400">
                   <span>Sun</span>
                   <span>Mon</span>
                   <span>Tue</span>
@@ -704,7 +712,7 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
         </section>
 
         <section className="grid grid-cols-1">
-          <Card className="border-slate-700/50 bg-slate-950/40">
+          <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40">
             <CardHeader>
               <CardTitle>Team Drilldown (from Jira worklog authors)</CardTitle>
             </CardHeader>
@@ -713,7 +721,7 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
                 <Link
                   key={member}
                   href={`/team/${encodeURIComponent(member)}`}
-                  className="rounded-full border border-slate-600 bg-slate-900/50 px-3 py-1 text-sm hover:bg-slate-800"
+                  className="rounded-full border border-slate-400 bg-slate-100/80 px-3 py-1 text-sm hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-900/50 dark:hover:bg-slate-800"
                 >
                   {member}
                 </Link>
@@ -725,3 +733,4 @@ export function WorklogDashboard({ entries, jiraBrowseUrl, syncEnabled, syncStat
     </div>
   );
 }
+
