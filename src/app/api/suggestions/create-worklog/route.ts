@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { hasValidSessionCookie } from "@/lib/auth";
-import { createJiraWorklog, type WorklogEntry } from "@/lib/jira";
+import { createJiraWorklog, getJiraCurrentUser, type WorklogEntry } from "@/lib/jira";
 import { isSupabaseConfigured } from "@/lib/supabase-admin";
 import { upsertWorklogs } from "@/lib/worklog-store";
 
@@ -44,6 +44,30 @@ export async function POST(request: Request) {
   }
 
   try {
+    const currentUser = await getJiraCurrentUser();
+    const expectedName = currentUser.displayName.trim().toLowerCase();
+    const expectedEmail = currentUser.emailAddress.trim().toLowerCase();
+    const expectedAccountId = currentUser.accountId.trim();
+    const requestedMember = body.member.trim().toLowerCase();
+    const requestedMemberAccountId = (body.memberAccountId ?? "").trim();
+
+    const memberMatchesName = expectedName.length > 0 && requestedMember === expectedName;
+    const memberMatchesEmail = expectedEmail.length > 0 && requestedMember === expectedEmail;
+    const memberMatchesAccountId =
+      expectedAccountId.length > 0 &&
+      requestedMemberAccountId.length > 0 &&
+      requestedMemberAccountId === expectedAccountId;
+
+    if (!memberMatchesName && !memberMatchesEmail && !memberMatchesAccountId) {
+      return NextResponse.json(
+        {
+          error:
+            "Worklog creation is restricted: you can only create worklogs for the Jira API user.",
+        },
+        { status: 403 }
+      );
+    }
+
     const created = await createJiraWorklog({
       issueKey: body.issueKey,
       started: body.started,

@@ -45,6 +45,23 @@ function normalizeAuthorKey(value: string): string {
   return value.trim().toLowerCase();
 }
 
+function firstNameSortKey(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+  const [first, ...rest] = trimmed.split(/\s+/);
+  return `${first.toLowerCase()} ${rest.join(" ").toLowerCase()}`.trim();
+}
+
+function formatDayEu(dayIso: string): string {
+  const date = new Date(`${dayIso}T00:00:00`);
+  if (Number.isNaN(date.getTime())) {
+    return dayIso;
+  }
+  return date.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
+}
+
 function toDayKey(date: Date): string {
   return date.toISOString().slice(0, 10);
 }
@@ -163,6 +180,7 @@ export function WorklogDashboard({ entries, contributorTargets, jiraBrowseUrl, s
   const [selectedPreset, setSelectedPreset] = useState<string>("none");
   const [presetName, setPresetName] = useState("");
   const [selectedIssueKey, setSelectedIssueKey] = useState<string | null>(null);
+  const [selectedTrendDay, setSelectedTrendDay] = useState<string | null>(null);
 
   useEffect(() => {
     const { start, end } = getPresetRange(datePreset);
@@ -258,9 +276,13 @@ export function WorklogDashboard({ entries, contributorTargets, jiraBrowseUrl, s
         .map(([key, name]) => ({ key, label: `${key} - ${name}` })),
     ];
   }, [entries]);
-  const authors = useMemo(() => ["all", ...new Set(entries.map((item) => item.author))], [entries]);
+  const authors = useMemo(
+    () => ["all", ...[...new Set(entries.map((item) => item.author))].sort((a, b) => firstNameSortKey(a).localeCompare(firstNameSortKey(b)))],
+    [entries]
+  );
   const teams = useMemo(
-    () => ["all", ...new Set(entries.flatMap((item) => item.teamNames).filter((name) => name.trim()))],
+    () =>
+      ["all", ...[...new Set(entries.flatMap((item) => item.teamNames).filter((name) => name.trim()))].sort((a, b) => a.localeCompare(b))],
     [entries]
   );
 
@@ -424,6 +446,64 @@ export function WorklogDashboard({ entries, contributorTargets, jiraBrowseUrl, s
     () => polylinePath(trend.map(() => metrics.dailyTargetHours), 760, 160, trendMax),
     [metrics.dailyTargetHours, trend, trendMax]
   );
+  const trendPoints = useMemo(
+    () =>
+      trend.map((point, index) => ({
+        day: point.day,
+        hours: point.hours,
+        x: 40 + (index / Math.max(trend.length - 1, 1)) * 700,
+        y: 170 - (point.hours / trendMax) * 160 + 10,
+      })),
+    [trend, trendMax]
+  );
+  const trendTickStep = useMemo(() => {
+    if (trend.length <= 20) {
+      return 1;
+    }
+    return Math.ceil(trend.length / 12);
+  }, [trend.length]);
+
+  const selectedTrendEntries = useMemo(
+    () =>
+      selectedTrendDay
+        ? filtered.filter((entry) => toDayKey(new Date(entry.started)) === selectedTrendDay)
+        : [],
+    [filtered, selectedTrendDay]
+  );
+  const selectedTrendTotal = useMemo(
+    () => selectedTrendEntries.reduce((sum, entry) => sum + entry.seconds / 3600, 0),
+    [selectedTrendEntries]
+  );
+  const selectedTrendByAuthor = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const entry of selectedTrendEntries) {
+      map.set(entry.author, (map.get(entry.author) ?? 0) + entry.seconds / 3600);
+    }
+    return [...map.entries()]
+      .map(([name, hours]) => ({ name, hours }))
+      .sort((a, b) => b.hours - a.hours);
+  }, [selectedTrendEntries]);
+  const selectedTrendByProject = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const entry of selectedTrendEntries) {
+      const key = `${entry.projectKey} - ${entry.projectName}`;
+      map.set(key, (map.get(key) ?? 0) + entry.seconds / 3600);
+    }
+    return [...map.entries()]
+      .map(([name, hours]) => ({ name, hours }))
+      .sort((a, b) => b.hours - a.hours);
+  }, [selectedTrendEntries]);
+  const selectedTrendByIssue = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const entry of selectedTrendEntries) {
+      const key = `${entry.issueKey} - ${entry.issueSummary}`;
+      map.set(key, (map.get(key) ?? 0) + entry.seconds / 3600);
+    }
+    return [...map.entries()]
+      .map(([name, hours]) => ({ name, hours }))
+      .sort((a, b) => b.hours - a.hours)
+      .slice(0, 12);
+  }, [selectedTrendEntries]);
 
   const strongestProject = topProjects[0] ? `${topProjects[0].key} - ${topProjects[0].name}` : "n/a";
   const strongestAuthor = topAuthors[0]?.name ?? "n/a";
@@ -554,8 +634,62 @@ export function WorklogDashboard({ entries, contributorTargets, jiraBrowseUrl, s
         </section>
 
         <section className="grid grid-cols-3 gap-4">
-          <Card className="col-span-2 border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40"><CardHeader><CardTitle>Worklog Timeline</CardTitle></CardHeader><CardContent><div className="rounded-xl border border-slate-300 bg-slate-100/90 p-4 dark:border-slate-700/40 dark:bg-slate-900/40"><svg viewBox="0 0 760 220" className="w-full"><defs><linearGradient id="trendLine" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f59e0b" stopOpacity="0.9" /><stop offset="100%" stopColor="#f59e0b" stopOpacity="0.15" /></linearGradient></defs><line x1="40" y1="170" x2="740" y2="170" stroke="currentColor" opacity="0.35" /><line x1="40" y1="20" x2="40" y2="170" stroke="currentColor" opacity="0.35" /><text x="34" y="170" textAnchor="end" fontSize="10" fill="currentColor">0</text><text x="34" y="95" textAnchor="end" fontSize="10" fill="currentColor">{(trendMax / 2).toFixed(1)}</text><text x="34" y="20" textAnchor="end" fontSize="10" fill="currentColor">{trendMax.toFixed(1)}</text>{trend.length > 0 && <text x="40" y="188" textAnchor="start" fontSize="10" fill="currentColor">{trend[0].day.slice(5)}</text>}{trend.length > 0 && <text x="740" y="188" textAnchor="end" fontSize="10" fill="currentColor">{trend[trend.length - 1].day.slice(5)}</text>}<polyline points={trendPath} fill="none" stroke="url(#trendLine)" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" transform="translate(0,10)" /><polyline points={trendTargetPath} fill="none" stroke="#22c55e" strokeWidth="2" strokeDasharray="5 4" strokeLinejoin="round" strokeLinecap="round" transform="translate(0,10)" /></svg></div><p className="mt-3 text-xs text-slate-600 dark:text-slate-400">Orange = actual, green dashed = summed daily targets. Peak project: <strong>{strongestProject}</strong>.</p></CardContent></Card>
-          <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40"><CardHeader><CardTitle>Smart Summary</CardTitle></CardHeader><CardContent className="space-y-3 text-sm text-slate-800 dark:text-slate-200">{summaryMode === "executive" && <><p>{hourFormat(metrics.totalHours)} across {metrics.issueCount} tickets. Largest effort center: <strong>{strongestProject}</strong>.</p><p>Target comparison: <strong>{hourFormat(metrics.totalHours)}</strong> actual vs <strong>{hourFormat(metrics.targetHours)}</strong> target.</p></>}{summaryMode === "delivery" && <><p>Delivery concentration: <strong>{topProjects[0] ? `${topProjects[0].key} - ${topProjects[0].name}` : "n/a"}</strong>, then <strong>{topProjects[1] ? `${topProjects[1].key} - ${topProjects[1].name}` : "n/a"}</strong>.</p><p>Highest ticket effort: <strong>{topIssues[0]?.key ?? "n/a"}</strong> ({hourFormat(topIssues[0]?.hours ?? 0)}).</p></>}{summaryMode === "team" && <><p>Top contributor: <strong>{strongestAuthor}</strong> with <strong>{hourFormat(topAuthors[0]?.hours ?? 0)}</strong>.</p><p>Team filter: {team === "all" ? "All teams" : team}</p></>}</CardContent></Card>
+          <Card className="col-span-2 border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40">
+            <CardHeader>
+              <CardTitle>Worklog Timeline</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="rounded-xl border border-slate-300 bg-slate-100/90 p-4 dark:border-slate-700/40 dark:bg-slate-900/40">
+                <svg viewBox="0 0 760 220" className="w-full">
+                  <defs>
+                    <linearGradient id="trendLine" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.9" />
+                      <stop offset="100%" stopColor="#f59e0b" stopOpacity="0.15" />
+                    </linearGradient>
+                  </defs>
+                  <line x1="40" y1="170" x2="740" y2="170" stroke="currentColor" opacity="0.35" />
+                  <line x1="40" y1="20" x2="40" y2="170" stroke="currentColor" opacity="0.35" />
+                  <text x="34" y="170" textAnchor="end" fontSize="10" fill="currentColor">0</text>
+                  <text x="34" y="95" textAnchor="end" fontSize="10" fill="currentColor">{(trendMax / 2).toFixed(1)}</text>
+                  <text x="34" y="20" textAnchor="end" fontSize="10" fill="currentColor">{trendMax.toFixed(1)}</text>
+                  {trendPoints
+                    .filter((_, index) => index % trendTickStep === 0 || index === trendPoints.length - 1)
+                    .map((point) => (
+                      <text key={`x-${point.day}`} x={point.x} y={188} textAnchor="middle" fontSize="9" fill="currentColor">
+                        {formatDayEu(point.day)}
+                      </text>
+                    ))}
+                  <polyline points={trendPath} fill="none" stroke="url(#trendLine)" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" transform="translate(0,10)" />
+                  <polyline points={trendTargetPath} fill="none" stroke="#22c55e" strokeWidth="2" strokeDasharray="5 4" strokeLinejoin="round" strokeLinecap="round" transform="translate(0,10)" />
+                  {trendPoints.map((point) => (
+                    <g key={point.day}>
+                      <circle
+                        cx={point.x}
+                        cy={point.y}
+                        r={selectedTrendDay === point.day ? 4 : 2.8}
+                        fill={selectedTrendDay === point.day ? "#0ea5e9" : "#f59e0b"}
+                        className="cursor-pointer"
+                        onClick={() => setSelectedTrendDay(point.day)}
+                      >
+                        <title>{`${formatDayEu(point.day)}: ${hourFormat(point.hours)}`}</title>
+                      </circle>
+                    </g>
+                  ))}
+                </svg>
+              </div>
+              <p className="mt-3 text-xs text-slate-600 dark:text-slate-400">
+                Orange = actual, green dashed = summed daily targets. Hover points for hours, click points for day details. Peak project: <strong>{strongestProject}</strong>.
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40">
+            <CardHeader><CardTitle>Smart Summary</CardTitle></CardHeader>
+            <CardContent className="space-y-3 text-sm text-slate-800 dark:text-slate-200">
+              {summaryMode === "executive" && <><p>{hourFormat(metrics.totalHours)} across {metrics.issueCount} tickets. Largest effort center: <strong>{strongestProject}</strong>.</p><p>Target comparison: <strong>{hourFormat(metrics.totalHours)}</strong> actual vs <strong>{hourFormat(metrics.targetHours)}</strong> target.</p></>}
+              {summaryMode === "delivery" && <><p>Delivery concentration: <strong>{topProjects[0] ? `${topProjects[0].key} - ${topProjects[0].name}` : "n/a"}</strong>, then <strong>{topProjects[1] ? `${topProjects[1].key} - ${topProjects[1].name}` : "n/a"}</strong>.</p><p>Highest ticket effort: <strong>{topIssues[0]?.key ?? "n/a"}</strong> ({hourFormat(topIssues[0]?.hours ?? 0)}).</p></>}
+              {summaryMode === "team" && <><p>Top contributor: <strong>{strongestAuthor}</strong> with <strong>{hourFormat(topAuthors[0]?.hours ?? 0)}</strong>.</p><p>Team filter: {team === "all" ? "All teams" : team}</p></>}
+            </CardContent>
+          </Card>
         </section>
 
         <section className="grid grid-cols-2 gap-4">
@@ -616,10 +750,76 @@ export function WorklogDashboard({ entries, contributorTargets, jiraBrowseUrl, s
                         <span>{entry.author}</span>
                         <span>{hourFormat(entry.seconds / 3600)}</span>
                       </div>
-                      <p className="text-slate-800 dark:text-slate-200">{entry.comment || "(No worklog text provided)"}</p>
+                      <p className="text-slate-800 dark:text-slate-200">{entry.comment || "(Kein Worklog-Text vorhanden oder noch nicht synchronisiert)"}</p>
                     </div>
                   ))}
                 </div>
+              </CardContent>
+            </Card>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(selectedTrendDay)} onOpenChange={(open) => (!open ? setSelectedTrendDay(null) : undefined)}>
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>Day Details: {selectedTrendDay ? formatDayEu(selectedTrendDay) : ""}</DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-3 gap-4">
+            <Card className="border-slate-300 dark:border-slate-700">
+              <CardHeader>
+                <CardTitle className="text-base">By Contributor</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <p className="text-xs text-slate-600 dark:text-slate-400">Total day hours: <strong>{hourFormat(selectedTrendTotal)}</strong></p>
+                {selectedTrendByAuthor.map((item) => {
+                  const width = (item.hours / Math.max(selectedTrendByAuthor[0]?.hours ?? 1, 1)) * 100;
+                  return (
+                    <div key={item.name}>
+                      <div className="mb-1 flex justify-between text-xs">
+                        <span>{item.name}</span>
+                        <span>{hourFormat(item.hours)}</span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded bg-slate-300 dark:bg-slate-800">
+                        <div className="h-full bg-cyan-400" style={{ width: `${width}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
+            <Card className="border-slate-300 dark:border-slate-700">
+              <CardHeader>
+                <CardTitle className="text-base">By Project</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {selectedTrendByProject.map((item) => {
+                  const width = (item.hours / Math.max(selectedTrendByProject[0]?.hours ?? 1, 1)) * 100;
+                  return (
+                    <div key={item.name}>
+                      <div className="mb-1 flex justify-between text-xs">
+                        <span>{item.name}</span>
+                        <span>{hourFormat(item.hours)}</span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded bg-slate-300 dark:bg-slate-800">
+                        <div className="h-full bg-amber-400" style={{ width: `${width}%` }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </CardContent>
+            </Card>
+            <Card className="border-slate-300 dark:border-slate-700">
+              <CardHeader>
+                <CardTitle className="text-base">Top Tasks</CardTitle>
+              </CardHeader>
+              <CardContent className="max-h-[56vh] space-y-2 overflow-auto">
+                {selectedTrendByIssue.map((item) => (
+                  <div key={item.name} className="rounded border border-slate-300 bg-slate-100/80 p-2 text-xs dark:border-slate-700 dark:bg-slate-900/50">
+                    <div className="mb-1 font-medium">{item.name}</div>
+                    <div className="text-slate-600 dark:text-slate-400">{hourFormat(item.hours)}</div>
+                  </div>
+                ))}
               </CardContent>
             </Card>
           </div>

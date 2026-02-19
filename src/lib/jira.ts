@@ -25,7 +25,7 @@ type JiraIssue = {
       name: string;
     };
     worklog?: JiraWorklogContainer;
-  };
+  } & Record<string, unknown>;
   changelog?: {
     histories?: JiraChangelogHistory[];
   };
@@ -92,6 +92,12 @@ type JiraIssueCommentsResponse = {
   total: number;
 };
 
+type JiraCurrentUserResponse = {
+  accountId?: string;
+  displayName?: string;
+  emailAddress?: string;
+};
+
 export type WorklogEntry = {
   id: string;
   issueId: string;
@@ -121,6 +127,12 @@ export type WorklogSuggestion = {
   changeSummary: string;
 };
 
+export type JiraCurrentUser = {
+  accountId: string;
+  displayName: string;
+  emailAddress: string;
+};
+
 type JiraConfig = {
   baseUrl: string;
   email: string;
@@ -128,6 +140,7 @@ type JiraConfig = {
   jql: string;
   maxIssues: number;
   teamGroupPrefix: string;
+  teamFieldId: string;
 };
 
 type SuggestionQuery = {
@@ -154,6 +167,7 @@ function getConfig(): JiraConfig {
     jql: process.env.JIRA_JQL ?? "worklogDate >= startOfMonth(-2)",
     maxIssues: Number.parseInt(process.env.JIRA_MAX_ISSUES ?? "100", 10),
     teamGroupPrefix: (process.env.JIRA_TEAM_GROUP_PREFIX ?? "").trim().toLowerCase(),
+    teamFieldId: (process.env.JIRA_TEAM_FIELD_ID ?? "").trim(),
   };
 }
 
@@ -278,6 +292,37 @@ function normalizeWorklog(issue: JiraIssue, worklog: JiraWorklog, teamNames: str
     seconds: worklog.timeSpentSeconds,
     comment: normalizeWorklogComment(worklog.comment),
   };
+}
+
+function extractTeamNames(value: unknown): string[] {
+  if (!value) {
+    return [];
+  }
+  if (typeof value === "string") {
+    return value.trim() ? [value.trim()] : [];
+  }
+  if (Array.isArray(value)) {
+    return value
+      .flatMap((item) => extractTeamNames(item))
+      .map((name) => name.trim())
+      .filter(Boolean);
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    const candidate = record.name ?? record.value ?? record.teamName ?? record.displayName;
+    if (typeof candidate === "string" && candidate.trim()) {
+      return [candidate.trim()];
+    }
+  }
+  return [];
+}
+
+function getIssueTeamNames(issue: JiraIssue, teamFieldId: string): string[] {
+  if (!teamFieldId) {
+    return [];
+  }
+  const teamValue = issue.fields[teamFieldId];
+  return [...new Set(extractTeamNames(teamValue))];
 }
 
 function normalizePersonName(value: string): string {
@@ -422,10 +467,15 @@ async function fetchIssues(cfg: JiraConfig): Promise<JiraIssue[]> {
   let startAt = 0;
   const maxResults = 100;
 
+  const fields = ["summary", "project", "worklog", "status"];
+  if (cfg.teamFieldId) {
+    fields.push(cfg.teamFieldId);
+  }
+
   while (allIssues.length < cfg.maxIssues) {
     const response = await jiraGet<JiraIssueSearchResponse>(cfg, "/rest/api/3/search/jql", {
       jql: cfg.jql,
-      fields: "summary,project,worklog,status",
+      fields: fields.join(","),
       maxResults,
       startAt,
     });
@@ -477,11 +527,13 @@ export async function fetchJiraWorklogs(): Promise<WorklogEntry[]> {
   }
 
   for (const issue of issues) {
+    const issueTeamNames = getIssueTeamNames(issue, cfg.teamFieldId);
     const worklogs = await getAllIssueWorklogs(cfg, issue);
     for (const worklog of worklogs) {
       if (worklog.timeSpentSeconds > 0) {
         const accountId = worklog.author?.accountId ?? "";
-        const teamNames = await getTeamsForAccount(accountId);
+        const authorTeams = await getTeamsForAccount(accountId);
+        const teamNames = issueTeamNames.length > 0 ? issueTeamNames : authorTeams;
         entries.push(normalizeWorklog(issue, worklog, teamNames));
       }
     }
@@ -506,10 +558,15 @@ async function fetchIssuesUpdatedOnDay(
   let startAt = 0;
   const maxResults = 50;
 
+  const fields = ["summary", "project", "worklog", "status"];
+  if (cfg.teamFieldId) {
+    fields.push(cfg.teamFieldId);
+  }
+
   while (startAt < 300) {
     const response = await jiraGet<JiraIssueChangelogSearchResponse>(cfg, "/rest/api/3/search/jql", {
       jql,
-      fields: "summary,project,worklog,status",
+      fields: fields.join(","),
       expand: "changelog",
       maxResults,
       startAt,
@@ -683,5 +740,15 @@ export async function createJiraWorklog(input: {
     started: created.started,
     seconds: created.timeSpentSeconds,
     comment: normalizeWorklogComment(created.comment),
+  };
+}
+
+export async function getJiraCurrentUser(): Promise<JiraCurrentUser> {
+  const cfg = getConfig();
+  const me = await jiraGet<JiraCurrentUserResponse>(cfg, "/rest/api/3/myself", {});
+  return {
+    accountId: me.accountId ?? "",
+    displayName: me.displayName ?? "",
+    emailAddress: me.emailAddress ?? "",
   };
 }

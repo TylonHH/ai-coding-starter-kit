@@ -52,6 +52,21 @@ function toLegacyRow(entry: WorklogEntry) {
   };
 }
 
+function toLegacyRowWithComment(entry: WorklogEntry) {
+  return {
+    id: entry.id,
+    issue_id: entry.issueId,
+    issue_key: entry.issueKey,
+    issue_summary: entry.issueSummary,
+    project_key: entry.projectKey,
+    project_name: entry.projectName,
+    author: entry.author,
+    started: entry.started,
+    seconds: entry.seconds,
+    comment: entry.comment,
+  };
+}
+
 function fromRow(row: WorklogRow): WorklogEntry {
   return {
     id: row.id,
@@ -90,12 +105,21 @@ export async function upsertWorklogs(entries: WorklogEntry[]): Promise<void> {
     });
 
     if (error?.message && (error.message.includes("author_account_id") || error.message.includes("team_names") || error.message.includes("comment"))) {
-      const legacyChunk = dedupedEntries.slice(index, index + chunkSize).map(toLegacyRow);
-      const fallback = await supabase.from("jira_worklogs").upsert(legacyChunk, {
+      const semiLegacyChunk = dedupedEntries.slice(index, index + chunkSize).map(toLegacyRowWithComment);
+      const semiFallback = await supabase.from("jira_worklogs").upsert(semiLegacyChunk, {
         onConflict: "id",
         ignoreDuplicates: false,
       });
-      error = fallback.error;
+      error = semiFallback.error;
+
+      if (error?.message?.includes("comment")) {
+        const legacyChunk = dedupedEntries.slice(index, index + chunkSize).map(toLegacyRow);
+        const fallback = await supabase.from("jira_worklogs").upsert(legacyChunk, {
+          onConflict: "id",
+          ignoreDuplicates: false,
+        });
+        error = fallback.error;
+      }
     }
 
     if (error) {
@@ -128,18 +152,32 @@ export async function readAllWorklogs(): Promise<WorklogEntry[]> {
     }
 
     if (error?.message?.includes("author_account_id") || error?.message?.includes("team_names") || error?.message?.includes("comment")) {
-      const fallback = await supabase
+      const fallbackWithComment = await supabase
         .from("jira_worklogs")
-        .select("id,issue_id,issue_key,issue_summary,project_key,project_name,author,started,seconds")
+        .select("id,issue_id,issue_key,issue_summary,project_key,project_name,author,started,seconds,comment")
         .order("started", { ascending: true })
         .range(from, to);
-      data = (fallback.data ?? []).map((row) => ({
+      data = (fallbackWithComment.data ?? []).map((row) => ({
         ...row,
         author_account_id: "unknown-account",
         team_names: [],
-        comment: "",
       }));
-      error = fallback.error;
+      error = fallbackWithComment.error;
+
+      if (error?.message?.includes("comment")) {
+        const fallback = await supabase
+          .from("jira_worklogs")
+          .select("id,issue_id,issue_key,issue_summary,project_key,project_name,author,started,seconds")
+          .order("started", { ascending: true })
+          .range(from, to);
+        data = (fallback.data ?? []).map((row) => ({
+          ...row,
+          author_account_id: "unknown-account",
+          team_names: [],
+          comment: "",
+        }));
+        error = fallback.error;
+      }
     }
 
     if (error) {

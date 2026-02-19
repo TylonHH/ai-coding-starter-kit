@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { hasValidSessionCookie } from "@/lib/auth";
-import { generateWorklogSuggestions } from "@/lib/jira";
+import { generateWorklogSuggestions, getJiraCurrentUser } from "@/lib/jira";
 
 type Payload = {
   member: string;
@@ -31,6 +31,30 @@ export async function POST(request: Request) {
   }
 
   try {
+    const currentUser = await getJiraCurrentUser();
+    const expectedName = currentUser.displayName.trim().toLowerCase();
+    const expectedEmail = currentUser.emailAddress.trim().toLowerCase();
+    const expectedAccountId = currentUser.accountId.trim();
+    const requestedMember = body.member.trim().toLowerCase();
+    const requestedMemberAccountId = (typeof body.accountId === "string" ? body.accountId : "").trim();
+
+    const memberMatchesName = expectedName.length > 0 && requestedMember === expectedName;
+    const memberMatchesEmail = expectedEmail.length > 0 && requestedMember === expectedEmail;
+    const memberMatchesAccountId =
+      expectedAccountId.length > 0 &&
+      requestedMemberAccountId.length > 0 &&
+      requestedMemberAccountId === expectedAccountId;
+
+    if (!memberMatchesName && !memberMatchesEmail && !memberMatchesAccountId) {
+      return NextResponse.json(
+        {
+          error:
+            "Suggestion generation is restricted: only the Jira API user can generate own worklog suggestions.",
+        },
+        { status: 403 }
+      );
+    }
+
     const suggestions = await generateWorklogSuggestions({
       memberName: body.member,
       accountId: typeof body.accountId === "string" ? body.accountId : undefined,

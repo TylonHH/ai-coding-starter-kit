@@ -402,7 +402,7 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
                             <span>{hourFormat(entry.seconds / 3600)}</span>
                             <span>{entry.issueKey}</span>
                           </div>
-                          <p className="text-slate-800 dark:text-slate-200">{entry.comment || "(No worklog text provided)"}</p>
+                          <p className="text-slate-800 dark:text-slate-200">{entry.comment || "(Kein Worklog-Text vorhanden oder noch nicht synchronisiert)"}</p>
                         </div>
                       ))}
                     </div>
@@ -531,7 +531,7 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
                                 <span>{entry.author}{highlighted ? " (You)" : ""}</span>
                                 <span>{hourFormat(entry.seconds / 3600)}</span>
                               </div>
-                              <p className="text-slate-800 dark:text-slate-200">{entry.comment || "(No worklog text provided)"}</p>
+                              <p className="text-slate-800 dark:text-slate-200">{entry.comment || "(Kein Worklog-Text vorhanden oder noch nicht synchronisiert)"}</p>
                             </div>
                           );
                         })}
