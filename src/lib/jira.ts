@@ -104,9 +104,23 @@ function extractAdfText(node: unknown): string {
   if (!node || typeof node !== "object") {
     return "";
   }
-  const typed = node as { type?: string; text?: string; content?: unknown[] };
+  const typed = node as {
+    type?: string;
+    text?: string;
+    attrs?: { text?: string; shortName?: string };
+    content?: unknown[];
+  };
   if (typed.type === "text" && typeof typed.text === "string") {
     return typed.text;
+  }
+  if (typed.type === "hardBreak") {
+    return "\n";
+  }
+  if (typed.type === "mention" && typeof typed.attrs?.text === "string") {
+    return typed.attrs.text;
+  }
+  if (typed.type === "emoji" && typeof typed.attrs?.shortName === "string") {
+    return typed.attrs.shortName;
   }
   if (Array.isArray(typed.content)) {
     return typed.content.map(extractAdfText).join(" ").trim();
