@@ -36,6 +36,9 @@ yarn-error.log*
 # claude code personal settings
 .claude/settings.local.json
 
+# memory bank
+memory-bank/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
