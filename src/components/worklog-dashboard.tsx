@@ -7,6 +7,7 @@ import type { WorklogEntry } from "@/lib/jira";
 import { ModeToggle } from "@/components/mode-toggle";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -24,6 +25,7 @@ type DashboardState = {
   author: string;
   search: string;
   summaryMode: SummaryMode;
+  excludeWeekends: boolean;
 };
 
 type Props = {
@@ -129,16 +131,61 @@ function getPresetRange(preset: DatePreset): { start: Date | null; end: Date | n
   return { start: null, end: null };
 }
 
-function buildTrendPoints(entries: WorklogEntry[]) {
+function buildTrendPoints(
+  entries: WorklogEntry[],
+  startBound: Date | null,
+  endBoundInclusive: Date | null,
+  excludeWeekends: boolean
+) {
   const byDay = new Map<string, number>();
   for (const entry of entries) {
     const day = toDayKey(new Date(entry.started));
     byDay.set(day, (byDay.get(day) ?? 0) + entry.seconds / 3600);
   }
 
-  return [...byDay.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([day, hours]) => ({ day, hours }));
+  let rangeStart: Date | null = null;
+  let rangeEnd: Date | null = null;
+
+  if (startBound && endBoundInclusive) {
+    rangeStart = new Date(startBound.getFullYear(), startBound.getMonth(), startBound.getDate());
+    rangeEnd = new Date(
+      endBoundInclusive.getFullYear(),
+      endBoundInclusive.getMonth(),
+      endBoundInclusive.getDate()
+    );
+  } else if (entries.length > 0) {
+    const sorted = entries
+      .map((entry) => new Date(entry.started))
+      .filter((value) => !Number.isNaN(value.getTime()))
+      .sort((a, b) => a.getTime() - b.getTime());
+    const min = sorted[0];
+    const max = sorted[sorted.length - 1];
+    if (min && max) {
+      rangeStart = new Date(min.getFullYear(), min.getMonth(), min.getDate());
+      rangeEnd = new Date(max.getFullYear(), max.getMonth(), max.getDate());
+    }
+  }
+
+  if (!rangeStart || !rangeEnd) {
+    return [];
+  }
+
+  const points: Array<{ day: string; hours: number }> = [];
+  const cursor = new Date(rangeStart);
+  while (cursor.getTime() <= rangeEnd.getTime()) {
+    const dayOfWeek = cursor.getDay();
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+    if (!excludeWeekends || !isWeekend) {
+      const day = toDayKey(cursor);
+      points.push({
+        day,
+        hours: byDay.get(day) ?? 0,
+      });
+    }
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return points;
 }
 
 function buildHeatmap(entries: WorklogEntry[]) {
@@ -208,6 +255,7 @@ export function WorklogDashboard({
   const [author, setAuthor] = useState("all");
   const [search, setSearch] = useState("");
   const [summaryMode, setSummaryMode] = useState<SummaryMode>("executive");
+  const [excludeWeekends, setExcludeWeekends] = useState(false);
   const [selectedIssueKey, setSelectedIssueKey] = useState<string | null>(null);
   const [selectedTrendDay, setSelectedTrendDay] = useState<string | null>(null);
   const [isStateLoaded, setIsStateLoaded] = useState(false);
@@ -259,6 +307,9 @@ export function WorklogDashboard({
         if (parsed.summaryMode && ["executive", "delivery", "team"].includes(parsed.summaryMode)) {
           setSummaryMode(parsed.summaryMode as SummaryMode);
         }
+        if (typeof parsed.excludeWeekends === "boolean") {
+          setExcludeWeekends(parsed.excludeWeekends);
+        }
       }
 
       const storedSync = localStorage.getItem(latestSyncStorageKey);
@@ -290,13 +341,14 @@ export function WorklogDashboard({
       author,
       search,
       summaryMode,
+      excludeWeekends,
     };
     try {
       localStorage.setItem(dashboardStateStorageKey, JSON.stringify(payload));
     } catch {
       // ignore storage errors
     }
-  }, [author, dashboardStateStorageKey, datePreset, endDate, isStateLoaded, projectKey, search, startDate, summaryMode, team]);
+  }, [author, dashboardStateStorageKey, datePreset, endDate, excludeWeekends, isStateLoaded, projectKey, search, startDate, summaryMode, team]);
 
   useEffect(() => {
     if (!isStateLoaded) {
@@ -484,7 +536,10 @@ export function WorklogDashboard({
     return `conic-gradient(${stops})`;
   }, [issueContributorSlices]);
 
-  const trend = useMemo(() => buildTrendPoints(filtered), [filtered]);
+  const trend = useMemo(
+    () => buildTrendPoints(filtered, bounds.startBound, bounds.endBoundInclusive, excludeWeekends),
+    [bounds.endBoundInclusive, bounds.startBound, excludeWeekends, filtered]
+  );
   const heatmap = useMemo(() => buildHeatmap(filtered), [filtered]);
   const trendMax = useMemo(
     () => Math.max(1, ...trend.map((t) => t.hours), metrics.dailyTargetHours),
@@ -511,6 +566,15 @@ export function WorklogDashboard({
     }
     return Math.ceil(trend.length / 12);
   }, [trend.length]);
+
+  useEffect(() => {
+    if (!selectedTrendDay) {
+      return;
+    }
+    if (!trend.some((point) => point.day === selectedTrendDay)) {
+      setSelectedTrendDay(null);
+    }
+  }, [selectedTrendDay, trend]);
 
   const selectedTrendEntries = useMemo(
     () =>
@@ -685,7 +749,16 @@ export function WorklogDashboard({
         <section className="grid grid-cols-3 gap-4">
           <Card className="col-span-2 border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40">
             <CardHeader>
-              <CardTitle>Worklog Timeline</CardTitle>
+              <div className="flex items-center justify-between gap-4">
+                <CardTitle>Worklog Timeline</CardTitle>
+                <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
+                  <Checkbox
+                    checked={excludeWeekends}
+                    onCheckedChange={(checked) => setExcludeWeekends(Boolean(checked))}
+                  />
+                  Exclude weekends
+                </label>
+              </div>
             </CardHeader>
             <CardContent>
               <div className="rounded-xl border border-slate-300 bg-slate-100/90 p-4 dark:border-slate-700/40 dark:bg-slate-900/40">
@@ -727,7 +800,7 @@ export function WorklogDashboard({
                 </svg>
               </div>
               <p className="mt-3 text-xs text-slate-600 dark:text-slate-400">
-                Orange = actual, green dashed = summed daily targets. Hover points for hours, click points for day details. Peak project: <strong>{strongestProject}</strong>.
+                Orange = actual, green dashed = summed daily targets. Zero-days are included in the selected range. Hover points for hours, click points for day details. Peak project: <strong>{strongestProject}</strong>.
               </p>
             </CardContent>
           </Card>
