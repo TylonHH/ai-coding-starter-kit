@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, ChevronLeft, ChevronRight, Link2, Timer } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, Link2, RefreshCw, Timer } from "lucide-react";
 import { hasValidSessionCookie } from "@/lib/auth";
 import { fetchJiraWorklogs } from "@/lib/jira";
 import { isSupabaseConfigured } from "@/lib/supabase-admin";
+import { WorklogSuggestionPanel } from "@/components/worklog-suggestion-panel";
 import { readAllWorklogs, readContributorTargets } from "@/lib/worklog-store";
 import { ModeToggle } from "@/components/mode-toggle";
 import { Button } from "@/components/ui/button";
@@ -92,6 +93,17 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
   if (memberEntries.length === 0) {
     notFound();
   }
+  const memberAccountId = [...memberEntries]
+    .filter((item) => item.authorAccountId && item.authorAccountId !== "unknown-account")
+    .reduce(
+      (acc, item) => {
+        acc.set(item.authorAccountId, (acc.get(item.authorAccountId) ?? 0) + 1);
+        return acc;
+      },
+      new Map<string, number>()
+    );
+  const preferredAccountId =
+    [...memberAccountId.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
 
   const targets = isSupabaseConfigured() ? await readContributorTargets() : {};
   const normalizedTargetMap = new Map(
@@ -167,6 +179,9 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
         .filter((item) => dayKey(new Date(item.started)) === selectedDay)
         .sort((a, b) => new Date(b.started).getTime() - new Date(a.started).getTime())
     : [];
+  const selectedDayTotalHours = selectedDayLogs.reduce((sum, item) => sum + item.seconds / 3600, 0);
+  const selectedDayOverbooked = dailyTarget > 0 && selectedDayTotalHours > dailyTarget * 1.15;
+  const selectedDayIssueKeys = [...new Set(selectedDayLogs.map((item) => item.issueKey))];
 
   const selectedIssueLogs = selectedIssue
     ? entries
@@ -196,6 +211,19 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
               <Link href="/">
                 <ArrowLeft className="mr-2 h-4 w-4" />
                 Back to Dashboard
+              </Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link
+                href={buildMemberHref(member, {
+                  month,
+                  project: activeProject,
+                  day: selectedDay || undefined,
+                  issue: selectedIssue || undefined,
+                })}
+              >
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Refresh
               </Link>
             </Button>
             <form action="/api/auth/logout" method="post">
@@ -315,17 +343,27 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
                   const hours = dayHours.get(key) ?? 0;
                   const ratio = dailyTarget > 0 ? Math.min(hours / dailyTarget, 1.5) : 0;
                   const isSelected = selectedDay === key;
+                  const isOverbooked = dailyTarget > 0 && hours > dailyTarget * 1.15;
                   return (
                     <Link
                       key={key}
                       href={buildMemberHref(member, { month, project: activeProject, day: key })}
-                      className={`h-20 rounded border p-2 transition ${isSelected ? "border-cyan-500 bg-cyan-100/70 dark:border-cyan-400 dark:bg-cyan-900/20" : "border-slate-300 bg-slate-100/80 dark:border-slate-700 dark:bg-slate-900/50"}`}
+                      className={`h-20 rounded border p-2 transition ${
+                        isSelected
+                          ? "border-cyan-500 bg-cyan-100/70 dark:border-cyan-400 dark:bg-cyan-900/20"
+                          : isOverbooked
+                            ? "border-rose-400 bg-rose-100/70 dark:border-rose-500 dark:bg-rose-900/20"
+                            : "border-slate-300 bg-slate-100/80 dark:border-slate-700 dark:bg-slate-900/50"
+                      }`}
                     >
-                      <div className="text-xs font-semibold">{cell.date.getDate()}</div>
+                      <div className="flex items-center justify-between text-xs font-semibold">
+                        <span>{cell.date.getDate()}</span>
+                        {isOverbooked ? <span className="text-rose-700 dark:text-rose-300">!</span> : null}
+                      </div>
                       <div className="mt-1 text-sm">{hourFormat(hours)}</div>
                       <div className="mt-1 h-1.5 overflow-hidden rounded bg-slate-300 dark:bg-slate-800">
                         <div
-                          className={`h-full ${ratio >= 1 ? "bg-emerald-400" : "bg-amber-400"}`}
+                          className={`h-full ${isOverbooked ? "bg-rose-500" : ratio >= 1 ? "bg-emerald-400" : "bg-amber-400"}`}
                           style={{ width: `${Math.min(ratio * 100, 100)}%` }}
                         />
                       </div>
@@ -341,6 +379,14 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
                       <Link href={buildMemberHref(member, { month, project: activeProject })}>Clear</Link>
                     </Button>
                   </div>
+                  <div className="mb-2 text-xs text-slate-600 dark:text-slate-400">
+                    Total on date: <strong>{hourFormat(selectedDayTotalHours)}</strong> / Target: <strong>{hourFormat(dailyTarget)}</strong>
+                  </div>
+                  {selectedDayOverbooked && (
+                    <p className="mb-2 rounded border border-rose-400/60 bg-rose-100 px-3 py-2 text-xs text-rose-900 dark:bg-rose-900/20 dark:text-rose-200">
+                      Warning: Reported hours are above target for this day.
+                    </p>
+                  )}
                   {selectedDayLogs.length === 0 ? (
                     <p className="text-slate-700 dark:text-slate-300">No worklogs for this date.</p>
                   ) : (
@@ -390,90 +436,108 @@ export default async function TeamMemberPage({ params, searchParams }: Props) {
             </CardContent>
           </Card>
 
-          <Card className="col-span-2 border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40">
-            <CardHeader>
-              <CardTitle>Top Issues From Selected Period</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="overflow-hidden rounded border border-slate-300 dark:border-slate-700/40">
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-slate-200/90 text-xs uppercase tracking-widest text-slate-600 dark:bg-slate-900/80 dark:text-slate-400">
-                    <tr>
-                      <th className="px-3 py-2">Issue</th>
-                      <th className="px-3 py-2">Project</th>
-                      <th className="px-3 py-2">Hours</th>
-                      <th className="px-3 py-2">Summary</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {topIssues.map((item) => (
-                      <tr key={item.key} className="border-t border-slate-300 dark:border-slate-800/80">
-                        <td className="px-3 py-2 font-mono text-xs text-emerald-700 dark:text-emerald-200">
-                          <div className="flex items-center gap-2">
-                            <Link
-                              href={buildMemberHref(member, { month, project: activeProject, issue: item.key })}
-                              className="hover:text-emerald-900 hover:underline dark:hover:text-emerald-100"
-                            >
-                              {item.key}
-                            </Link>
-                            {jiraBrowseUrl && (
-                              <a
-                                href={`${jiraBrowseUrl}/browse/${item.key}`}
-                                target="_blank"
-                                rel="noreferrer noopener"
-                                className="inline-flex items-center gap-1 text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
-                              >
-                                <Link2 className="h-3 w-3" />
-                              </a>
-                            )}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 text-slate-800 dark:text-slate-200">{item.projectKey} - {item.project}</td>
-                        <td className="px-3 py-2 text-slate-800 dark:text-slate-200">{hourFormat(item.hours)}</td>
-                        <td className="truncate px-3 py-2 text-slate-700 dark:text-slate-300">{item.summary}</td>
+          {selectedDay ? (
+            <Card className="col-span-2 border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40">
+              <CardHeader>
+                <CardTitle>Smart Suggestions For {selectedDay}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <WorklogSuggestionPanel
+                  member={member}
+                  memberAccountId={preferredAccountId}
+                  date={selectedDay}
+                  projectKey={activeProject}
+                  existingIssueKeys={selectedDayIssueKeys}
+                  jiraBrowseUrl={jiraBrowseUrl}
+                />
+              </CardContent>
+            </Card>
+          ) : (
+            <Card className="col-span-2 border-slate-300/80 bg-white/80 dark:border-slate-700/50 dark:bg-slate-950/40">
+              <CardHeader>
+                <CardTitle>Top Issues From Selected Period</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="overflow-hidden rounded border border-slate-300 dark:border-slate-700/40">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-slate-200/90 text-xs uppercase tracking-widest text-slate-600 dark:bg-slate-900/80 dark:text-slate-400">
+                      <tr>
+                        <th className="px-3 py-2">Issue</th>
+                        <th className="px-3 py-2">Project</th>
+                        <th className="px-3 py-2">Hours</th>
+                        <th className="px-3 py-2">Summary</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {selectedIssue && (
-                <div className="rounded border border-slate-300 bg-slate-100/80 p-3 dark:border-slate-700 dark:bg-slate-900/50">
-                  <div className="mb-2 flex items-center justify-between">
-                    <p className="font-semibold">Issue Worklogs: {selectedIssue}</p>
-                    <Button asChild variant="outline" size="sm">
-                      <Link href={buildMemberHref(member, { month, project: activeProject })}>Clear</Link>
-                    </Button>
-                  </div>
-                  <p className="mb-2 text-xs text-slate-600 dark:text-slate-400">
-                    Total issue hours: {hourFormat(selectedIssueHours)}. Your contribution: {hourFormat(selectedIssueMemberHours)}.
-                  </p>
-                  {selectedIssueLogs.length === 0 ? (
-                    <p className="text-sm text-slate-700 dark:text-slate-300">No worklogs found for this issue in the selected period.</p>
-                  ) : (
-                    <div className="max-h-72 space-y-2 overflow-auto">
-                      {selectedIssueLogs.map((entry) => {
-                        const highlighted = entry.author === member;
-                        return (
-                          <div
-                            key={entry.id}
-                            className={`rounded border p-2 text-sm ${highlighted ? "border-emerald-500 bg-emerald-100/80 dark:border-emerald-400 dark:bg-emerald-900/20" : "border-slate-300 bg-white/70 dark:border-slate-700 dark:bg-slate-950/40"}`}
-                          >
-                            <div className="mb-1 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
-                              <span>{new Date(entry.started).toLocaleString()}</span>
-                              <span>{entry.author}{highlighted ? " (You)" : ""}</span>
-                              <span>{hourFormat(entry.seconds / 3600)}</span>
+                    </thead>
+                    <tbody>
+                      {topIssues.map((item) => (
+                        <tr key={item.key} className="border-t border-slate-300 dark:border-slate-800/80">
+                          <td className="px-3 py-2 font-mono text-xs text-emerald-700 dark:text-emerald-200">
+                            <div className="flex items-center gap-2">
+                              <Link
+                                href={buildMemberHref(member, { month, project: activeProject, issue: item.key })}
+                                className="hover:text-emerald-900 hover:underline dark:hover:text-emerald-100"
+                              >
+                                {item.key}
+                              </Link>
+                              {jiraBrowseUrl && (
+                                <a
+                                  href={`${jiraBrowseUrl}/browse/${item.key}`}
+                                  target="_blank"
+                                  rel="noreferrer noopener"
+                                  className="inline-flex items-center gap-1 text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100"
+                                >
+                                  <Link2 className="h-3 w-3" />
+                                </a>
+                              )}
                             </div>
-                            <p className="text-slate-800 dark:text-slate-200">{entry.comment || "(No worklog text provided)"}</p>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                          </td>
+                          <td className="px-3 py-2 text-slate-800 dark:text-slate-200">{item.projectKey} - {item.project}</td>
+                          <td className="px-3 py-2 text-slate-800 dark:text-slate-200">{hourFormat(item.hours)}</td>
+                          <td className="truncate px-3 py-2 text-slate-700 dark:text-slate-300">{item.summary}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              )}
-            </CardContent>
-          </Card>
+
+                {selectedIssue && (
+                  <div className="rounded border border-slate-300 bg-slate-100/80 p-3 dark:border-slate-700 dark:bg-slate-900/50">
+                    <div className="mb-2 flex items-center justify-between">
+                      <p className="font-semibold">Issue Worklogs: {selectedIssue}</p>
+                      <Button asChild variant="outline" size="sm">
+                        <Link href={buildMemberHref(member, { month, project: activeProject })}>Clear</Link>
+                      </Button>
+                    </div>
+                    <p className="mb-2 text-xs text-slate-600 dark:text-slate-400">
+                      Total issue hours: {hourFormat(selectedIssueHours)}. Your contribution: {hourFormat(selectedIssueMemberHours)}.
+                    </p>
+                    {selectedIssueLogs.length === 0 ? (
+                      <p className="text-sm text-slate-700 dark:text-slate-300">No worklogs found for this issue in the selected period.</p>
+                    ) : (
+                      <div className="max-h-72 space-y-2 overflow-auto">
+                        {selectedIssueLogs.map((entry) => {
+                          const highlighted = entry.author === member;
+                          return (
+                            <div
+                              key={entry.id}
+                              className={`rounded border p-2 text-sm ${highlighted ? "border-emerald-500 bg-emerald-100/80 dark:border-emerald-400 dark:bg-emerald-900/20" : "border-slate-300 bg-white/70 dark:border-slate-700 dark:bg-slate-950/40"}`}
+                            >
+                              <div className="mb-1 flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
+                                <span>{new Date(entry.started).toLocaleString()}</span>
+                                <span>{entry.author}{highlighted ? " (You)" : ""}</span>
+                                <span>{hourFormat(entry.seconds / 3600)}</span>
+                              </div>
+                              <p className="text-slate-800 dark:text-slate-200">{entry.comment || "(No worklog text provided)"}</p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
         </section>
       </div>
     </main>
